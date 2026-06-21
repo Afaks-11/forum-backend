@@ -1,0 +1,35 @@
+{
+	"name": "forum-backend",
+	"version": "1.0.0",
+	"description": "",
+	"homepage": "https://github.com/Afaks-11/forum-backend#readme",
+	"bugs": {
+		"url": "https://github.com/Afaks-11/forum-backend/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Afaks-11/forum-backend.git"
+	},
+	"license": "ISC",
+	"author": "Hamman Wadzani Afakirya",
+	"type": "module",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"lint-format": "biome check --write ",
+		"prepare": "husky"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.0",
+		"@eslint/js": "^10.0.1",
+		"@types/node": "^25.9.1",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.8",
+		"typescript": "^6.0.3"
+	},
+	"lint-staged": {
+		"*.{ts, json}": [
+			"biome check --write"
+		]
+	}
+}
