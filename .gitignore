@@ -1,2 +1,17 @@
+# Dependencies
 node_modules
+dist/
+build/
+
+# Environment Configuration
 .env
+.env.docker
+*.env
+
+# Prisma Database Assests
+/src/generated/prisma
+*.db 
+
+# Operating System Garbage 
+.DS_Store
+.vscode/
