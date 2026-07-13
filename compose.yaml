@@ -1,0 +1,54 @@
+
+services:
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: forum_api
+    ports: 
+      - "5000:3000"
+    env_file:
+      - .env.docker
+    depends_on:
+      forum-postgres: 
+        condition: service_healthy
+      forum-redis: 
+        condition: service_healthy
+    restart: unless-stopped
+
+  forum-postgres:
+    image: postgres:17-alpine
+    container_name: forum-postgres
+    ports: 
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: forum_user
+      POSTGRES_PASSWORD: forum_password
+      POSTGRES_DB: forum_db
+    volumes:
+      - forum_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck: 
+      test: ["CMD-SHELL", "pg_isready -U forum_user -d forum_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  forum-redis:
+    image: redis:7.0.15
+    container_name: forum-redis
+    ports: 
+      - "6380:6379"
+    volumes: 
+      - forum_redis_data:/data
+    healthcheck: 
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  forum_postgres_data:
+  forum_redis_data:
