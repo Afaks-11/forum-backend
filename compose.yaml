@@ -39,7 +39,7 @@ services:
     image: redis:7.0.15
     container_name: forum-redis
     ports: 
-      - "127.0.0.1:{REDIS_EXPOSED_PORT:-6380}:6379"
+      - "127.0.0.1:${REDIS_EXPOSED_PORT:-6380}:6379"
     volumes: 
       - forum_redis_data:/data
     healthcheck: 

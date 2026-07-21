@@ -41,7 +41,7 @@
 		"typescript": "^6.0.3"
 	},
 	"lint-staged": {
-		"*.{ts, json}": [
+		"*.{ts,json}": [
 			"biome check --write"
 		]
 	},
