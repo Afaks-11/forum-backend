@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+import { asyncHandler } from "../middlewares/asyncHandler.js";
 import {
 	deleteNotification,
 	getAllNotifications,

@@ -1,5 +1,5 @@
 import { AppError } from "../errors/AppError.js";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+import { asyncHandler } from "../middlewares/asyncHandler.js";
 import {
 	blacklistRefreshToken,
 	changeUserPassword,

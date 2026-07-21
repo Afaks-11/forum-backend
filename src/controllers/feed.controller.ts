@@ -1,4 +1,4 @@
-import { asyncHandler } from "../middleware/asyncHandler.js";
+import { asyncHandler } from "../middlewares/asyncHandler.js";
 import { getAdvancedPostsFeed } from "../services/feed.service.js";
 import { feedQuerySchema } from "../validators/feed.validator.js";
 

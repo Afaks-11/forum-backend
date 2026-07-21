@@ -12,8 +12,8 @@ import {
 	toggleModerationFlag,
 	unsavePost,
 } from "../controllers/post.controller.js";
-import { requireAuth } from "../middleware/auth.middleware.js";
-import { optionalAuth } from "../middleware/optionalAuth.middleware.js"; // Standard fallback utility if available
+import { requireAuth } from "../middlewares/auth.middleware.js";
+import { optionalAuth } from "../middlewares/optionalAuth.middleware.js"; // Standard fallback utility if available
 
 const router = express.Router();
 

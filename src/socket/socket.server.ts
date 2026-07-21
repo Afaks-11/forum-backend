@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
-import { socketAuthMiddleware } from "../middleware/socket.middleware.js";
+import { socketAuthMiddleware } from "../middlewares/socket.middleware.js";
 import { joinNotificationRoom } from "./rooms/notification.room.js";
 import { registerPostRoomListeners } from "./rooms/post.room.js";
 import type { AuthenticatedSocket } from "./socket.types.js";

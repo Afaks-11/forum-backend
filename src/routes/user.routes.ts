@@ -9,8 +9,8 @@ import {
 	unblockUser,
 	unfollowUser,
 } from "../controllers/user.controller.js";
-import { requireAuth } from "../middleware/auth.middleware.js";
-import { optionalAuth } from "../middleware/optionalAuth.middleware.js";
+import { requireAuth } from "../middlewares/auth.middleware.js";
+import { optionalAuth } from "../middlewares/optionalAuth.middleware.js";
 
 const router = express.Router();
 
