@@ -16,7 +16,7 @@ WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 
-RUN npx prisma generate
+RUN DATABASE_URL="postgresql://mock_user:mock_password@localhost:5432/mock_db" npx prisma generate
 
 RUN npm run build
 
