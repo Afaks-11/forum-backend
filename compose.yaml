@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     container_name: forum_api
     ports: 
-      - "5000:3000"
+      - "${API_PORT:-5000}:3000"
     env_file:
       - .env.docker
     depends_on:
@@ -20,7 +20,7 @@ services:
     image: postgres:17-alpine
     container_name: forum-postgres
     ports: 
-      - "5433:5432"
+      - "127.0.0.1:${DB_EXPOSED_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: forum_user
       POSTGRES_PASSWORD: forum_password
@@ -39,7 +39,7 @@ services:
     image: redis:7.0.15
     container_name: forum-redis
     ports: 
-      - "6380:6379"
+      - "127.0.0.1:{REDIS_EXPOSED_PORT:-6380}:6379"
     volumes: 
       - forum_redis_data:/data
     healthcheck: 
