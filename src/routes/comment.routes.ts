@@ -7,6 +7,7 @@ import {
 	removeComment,
 } from "../controllers/comment.controller.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireModerator } from "../middlewares/role.middleware.js";
 
 const router = express.Router();
 
@@ -17,8 +18,18 @@ router.patch("/:id", requireAuth, patchComment);
 router.delete("/:id", requireAuth, removeComment);
 
 router.post("/:id/save", requireAuth, handleCommentAction("SAVE"));
-router.post("/:id/lock", requireAuth, handleCommentAction("LOCK"));
-router.post("/:id/remove", requireAuth, handleCommentAction("REMOVE"));
+router.post(
+	"/:id/lock",
+	requireAuth,
+	requireModerator,
+	handleCommentAction("LOCK"),
+);
+router.post(
+	"/:id/remove",
+	requireAuth,
+	requireModerator,
+	handleCommentAction("REMOVE"),
+);
 router.post("/:id/report", requireAuth, handleCommentAction("REPORT"));
 
 export default router;

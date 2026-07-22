@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { createQueueConnection } from "../queues/connection.js";
 import { postRepository } from "../repositories/index.js";
+import { logger } from "../utils/logger.js";
 import {
 	calculateControversialScore,
 	calculateHotScore,
@@ -10,7 +11,7 @@ import { redis } from "../utils/redis.js";
 export const rankingWorker = new Worker(
 	"ranking-cron-queue",
 	async () => {
-		console.log(" Compiling dynamic feed rankings...");
+		logger.info(" Compiling dynamic feed rankings...");
 
 		// Pull top 1,000 active recent items to recalculate rankings
 		const recentPosts = await postRepository.findRecentActivePosts(1000);
@@ -43,7 +44,7 @@ export const rankingWorker = new Worker(
 		pipeline.zremrangebyrank(globalControversialKey, 0, -1001);
 
 		await pipeline.exec();
-		console.log("Dynamic feed rankings updated in Redis.");
+		logger.info("Dynamic feed rankings updated in Redis.");
 	},
 	{ connection: createQueueConnection() },
 );

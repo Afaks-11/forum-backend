@@ -1,6 +1,7 @@
 import { type Job, Worker } from "bullmq";
 import { createQueueConnection } from "../queues/connection.js";
 import type { CronJobData } from "../queues/cron.queue.js";
+import { logger } from "../utils/logger.js";
 import { prisma } from "../utils/prisma.js";
 
 export const cronWorker = new Worker<CronJobData>(
@@ -8,7 +9,10 @@ export const cronWorker = new Worker<CronJobData>(
 	async (job: Job<CronJobData>) => {
 		const { action } = job.data;
 
-		console.log(`[Cron Worker] Executing task: ${action}`);
+		logger.info(
+			{ jobId: job.id, targetAction: action },
+			`[Cron Worker] Executing task: ${action}`,
+		);
 
 		switch (action) {
 			case "PURGE_OLD_NOTIFICATIONS": {
@@ -22,8 +26,9 @@ export const cronWorker = new Worker<CronJobData>(
 					},
 				});
 
-				console.log(
-					`[Cron Worker] Purged ${result.count} stale read notifications.`,
+				logger.info(
+					{ purgedCount: result.count },
+					`[Cron Worker] Purged stale read notifications.`,
 				);
 				break;
 			}
@@ -40,8 +45,9 @@ export const cronWorker = new Worker<CronJobData>(
 					},
 				});
 
-				console.log(
-					`[Cron Worker] Hard-purged ${result.count} soft-deleted posts older than 30 days.`,
+				logger.info(
+					{ purgedCount: result.count },
+					`[Cron Worker] Hard-purged soft-deleted posts older than 30 days.`,
 				);
 				break;
 			}

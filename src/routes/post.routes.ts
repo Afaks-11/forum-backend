@@ -14,6 +14,7 @@ import {
 } from "../controllers/post.controller.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { optionalAuth } from "../middlewares/optionalAuth.middleware.js"; // Standard fallback utility if available
+import { requireModerator } from "../middlewares/role.middleware.js";
 
 const router = express.Router();
 
@@ -30,7 +31,12 @@ router.get("/posts/:id/votes", optionalAuth, getVotesData);
 router.post("/:id/save", requireAuth, savePost);
 router.delete("/:id/save", requireAuth, unsavePost);
 
-router.post("/:id/pin", requireAuth, toggleModerationFlag("PIN"));
+router.post(
+	"/:id/pin",
+	requireAuth,
+	requireModerator,
+	toggleModerationFlag("PIN"),
+);
 router.post("/:id/lock", requireAuth, toggleModerationFlag("LOCK"));
 router.post("/:id/hide", requireAuth, toggleModerationFlag("HIDE"));
 router.post("/:id/report", requireAuth, toggleModerationFlag("REPORT"));

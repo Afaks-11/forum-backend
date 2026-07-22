@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { socketAuthMiddleware } from "../middlewares/socket.middleware.js";
+import { logger } from "../utils/logger.js";
 import { joinNotificationRoom } from "./rooms/notification.room.js";
 import { registerPostRoomListeners } from "./rooms/post.room.js";
 import type { AuthenticatedSocket } from "./socket.types.js";
@@ -27,10 +28,16 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
 
 		joinNotificationRoom(authSocket);
 		registerPostRoomListeners(authSocket);
-		console.log(`Real-time client established connection: User [${userId}]`);
+		logger.info(
+			{ socketId: socket.id, userId },
+			`Real-time client established connection: User [${userId}]`,
+		);
 
 		authSocket.on("disconnect", () => {
-			console.log(` Client disconnected: User [${userId}]`);
+			logger.info(
+				{ socketId: socket.id, userId },
+				` Client disconnected: User [${userId}]`,
+			);
 		});
 	});
 

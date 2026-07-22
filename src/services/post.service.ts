@@ -157,8 +157,15 @@ export const modifyPostModerationState = async (
 
 	switch (action) {
 		case "LOCK": {
-			if (post.authorId !== userId)
+			const caller = await prisma.user.findUnique({
+				where: { id: userId },
+				select: { role: true },
+			});
+			const isModOrAdmin =
+				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
+			if (post.authorId !== userId && !isModOrAdmin) {
 				throw new AppError("Unauthorized action", 401);
+			}
 			const updated = await postRepository.updateLockStatus(postId, isLocked);
 
 			await redis.del(`post:${postId}`);

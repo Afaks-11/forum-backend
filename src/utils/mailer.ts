@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { logger } from "./logger.js";
 
 let transporter: Transporter | undefined;
 
@@ -37,10 +38,10 @@ export const sendSystemEmail = async (
 			html: htmlContent,
 		});
 
-		console.log(
+		logger.info(
 			`Email sent! Preview URL: ${nodemailer.getTestMessageUrl(info)}`,
 		);
 	} catch (error) {
-		console.error("Critical: Failed to deliver email alert:", error);
+		logger.error({ err: error }, "Critical: Failed to deliver email alert:");
 	}
 };

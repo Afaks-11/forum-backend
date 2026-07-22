@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger.js";
 import type { AuthenticatedSocket } from "../socket.types.js";
 
 export const registerPostRoomListeners = (
@@ -9,8 +10,9 @@ export const registerPostRoomListeners = (
 
 		const postRoom = `post:${postId}`;
 		socket.join(postRoom);
-		console.log(
-			`User [${socket.data.userId}] joined live updates for: ${postRoom}`,
+		logger.debug(
+			{ userId: socket.data.userId, room: postRoom },
+			`User joined live updates room`,
 		);
 	});
 
@@ -20,8 +22,9 @@ export const registerPostRoomListeners = (
 
 		const postRoom = `post:${postId}`;
 		socket.leave(postRoom);
-		console.log(
-			`User [${socket.data.userId}] left live updates for: ${postRoom}`,
+		logger.debug(
+			{ userId: socket.data.userId, room: postRoom },
+			`User left live updates room`,
 		);
 	});
 };

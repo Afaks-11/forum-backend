@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { castVote } from "../services/vote.service.js";
+import { logger } from "../utils/logger.js";
 import { castVoteSchema } from "../validators/vote.validator.js";
 
 export const voteCasting = async (
@@ -35,7 +36,7 @@ export const voteCasting = async (
 			return;
 		}
 
-		console.error("Failed To Cast Vote: ", error);
+		logger.error({ err: error }, "Failed To Cast Vote: ");
 		res.status(500).json({
 			success: false,
 			message: "Internal Server Error",

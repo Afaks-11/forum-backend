@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import { env } from "../config/env.config.js";
+import { logger } from "./logger.js";
 
 class RedisService {
 	private client: Redis;
@@ -9,10 +10,10 @@ class RedisService {
 			maxRetriesPerRequest: 3,
 		});
 		this.client.on("connect", () =>
-			console.log("Redis connection established."),
+			logger.info("Redis connection established."),
 		);
 		this.client.on("error", (err) =>
-			console.error("Redis connection error: ", err),
+			logger.error({ err }, "Redis connection error: "),
 		);
 	}
 
@@ -25,7 +26,10 @@ class RedisService {
 			if (!value) return null;
 			return JSON.parse(value) as T;
 		} catch (error) {
-			console.error(`Redis GET error for key ${key}: `, error);
+			logger.error(
+				{ err: error, cachekey: key },
+				`Redis GET error for key ${key}: `,
+			);
 			return null;
 		}
 	}
@@ -38,7 +42,10 @@ class RedisService {
 			const serialized = JSON.stringify(value);
 			await this.client.set(key, serialized, "EX", ttlSeconds);
 		} catch (error) {
-			console.error(`Redis SET error for key ${key}: `, error);
+			logger.error(
+				{ err: error, cachekey: key },
+				`Redis SET error for key ${key}: `,
+			);
 		}
 	}
 
@@ -49,7 +56,10 @@ class RedisService {
 		try {
 			await this.client.del(key);
 		} catch (error) {
-			console.error(`Redis DEL errror for key ${key}: `, error);
+			logger.error(
+				{ err: error, cachekey: key },
+				`Redis DEL errror for key ${key}: `,
+			);
 		}
 	}
 
@@ -60,7 +70,11 @@ class RedisService {
 		try {
 			const result = await this.client.exists(key);
 			return result === 1;
-		} catch (_error) {
+		} catch (error) {
+			logger.error(
+				{ err: error, cachekey: key },
+				`Redis EXISTS validation error for key ${key}`,
+			);
 			return false;
 		}
 	}
@@ -78,14 +92,21 @@ class RedisService {
 	async delPattern(pattern: string): Promise<void> {
 		const client = this.client;
 		let cursor = "0";
-		do {
-			const reply = await client.scan(cursor, "MATCH", pattern, "COUNT", 100);
-			cursor = reply[0];
-			const keys = reply[1];
-			if (keys.length > 0) {
-				await client.del(...keys);
-			}
-		} while (cursor !== "0");
+		try {
+			do {
+				const reply = await client.scan(cursor, "MATCH", pattern, "COUNT", 100);
+				cursor = reply[0];
+				const keys = reply[1];
+				if (keys.length > 0) {
+					await client.del(...keys);
+				}
+			} while (cursor !== "0");
+		} catch (error) {
+			logger.error(
+				{ err: error, searchPattern: pattern },
+				`Redis batch pattern deletion failed`,
+			);
+		}
 	}
 }
 

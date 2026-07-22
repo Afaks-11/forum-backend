@@ -1,6 +1,7 @@
 import { AppError } from "../errors/AppError.js";
 import { commentRepository, postRepository } from "../repositories/index.js";
 import { getIO } from "../socket/socket.server.js";
+import { logger } from "../utils/logger.js";
 import type { CreateCommentInput } from "../validators/comment.validator.js";
 import { sendInternalNotification } from "./notification.service.js";
 
@@ -38,7 +39,7 @@ export const createComment = async (
 			const io = getIO();
 			io.to(`post:${data.postId}`).emit("comment:new", reply);
 		} catch (_socketError) {
-			console.warn(
+			logger.warn(
 				"[Live Comments] Socket server offline; falling back to DB storage only.",
 			);
 		}
@@ -65,7 +66,7 @@ export const createComment = async (
 		const io = getIO();
 		io.to(`post:${data.postId}`).emit("comment:new", comment);
 	} catch (_socketError) {
-		console.warn(
+		logger.warn(
 			"[Live Comments] Socket server offline; falling back to DB storage only.",
 		);
 	}
@@ -117,6 +118,14 @@ export const modifyCommentState = async (
 
 		case "REMOVE":
 			await commentRepository.removeByModerator(commentId);
+			await sendInternalNotification({
+				recipientId: comment.authorId,
+				senderId: userId, // The moderator's user ID acting on the thread
+				type: "MOD_ACTION",
+				title: "Comment removed by moderation guidelines",
+				content: `Your comment was removed for violating community code standards. Reason: ${reasonText || "None specified"}`,
+				link: `/posts/${comment.postId}`,
+			});
 			break;
 
 		case "REPORT":
@@ -124,14 +133,6 @@ export const modifyCommentState = async (
 				commentId,
 				reporterId: userId,
 				reason: reasonText || "Violated community standards guidelines.",
-			});
-			await sendInternalNotification({
-				recipientId: comment.authorId,
-				senderId: userId, // The moderator's user ID
-				type: "MOD_ACTION",
-				title: "Comment removed by moderation guidelines",
-				content: `Your comment was removed for violating community code standards. Reason: ${reasonText || "None specified"}`,
-				link: `/posts/${comment.postId}`,
 			});
 			break;
 

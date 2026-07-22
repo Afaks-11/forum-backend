@@ -1,6 +1,7 @@
 import { type Job, Worker } from "bullmq";
 import { createQueueConnection } from "../queues/connection.js";
 import type { EmailJobData } from "../queues/email.queue.js";
+import { logger } from "../utils/logger.js";
 import { sendSystemEmail } from "../utils/mailer.js";
 
 export const emailWorker = new Worker<EmailJobData>(
@@ -8,7 +9,10 @@ export const emailWorker = new Worker<EmailJobData>(
 	async (job: Job<EmailJobData>) => {
 		const { to, subject, htmlContent } = job.data;
 
-		console.log(`[Email Worker] Processing job ${job.id} targeting ${to}`);
+		logger.info(
+			{ jobId: job.id, recipient: to },
+			`[Email Worker] Processing outgoing email transaction}`,
+		);
 		await sendSystemEmail(to, subject, htmlContent);
 	},
 	{
@@ -18,7 +22,8 @@ export const emailWorker = new Worker<EmailJobData>(
 );
 
 emailWorker.on("failed", (job, err) => {
-	console.error(
-		`[Email Worker] Job ${job?.id} permanently failed: ${err.message}`,
+	logger.error(
+		{ jobId: job?.id, err },
+		`[Email Worker] Job permanently failed: ${err.message}`,
 	);
 });
