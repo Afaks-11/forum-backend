@@ -14,6 +14,7 @@ import {
 	updateUserProfile,
 	verifyUserEmail,
 } from "../services/auth.service.js";
+import { logger } from "../utils/logger.js";
 import {
 	changePasswordSchema,
 	forgotPasswordSchema,
@@ -80,7 +81,7 @@ export const logout = asyncHandler(async (req, res) => {
 	const token = req.cookies?.refreshToken;
 	if (token) {
 		await blacklistRefreshToken(token).catch((err) =>
-			console.error("Failed to blacklist refresh token on logout", err),
+			logger.error({ err }, "Failed to blacklist refresh token on logout", err),
 		);
 	}
 

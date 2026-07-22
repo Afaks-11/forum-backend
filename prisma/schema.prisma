@@ -12,6 +12,12 @@ datasource db {
   provider = "postgresql"
 }
 
+enum SystemRole {
+  USER 
+  MODERATOR
+  ADMIN
+}
+
 enum MembershipRole {
   MEMBER 
   MODERATOR
@@ -35,7 +41,8 @@ model User {
   username String @unique
   email String @unique 
   password String 
-  bio String?
+
+  role SystemRole @default(USER)
 
   isEmailVerified Boolean @default(false)
   emailVerifyToken String? @unique 

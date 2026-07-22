@@ -8,6 +8,7 @@ import {
 	tokenBlacklistRepository,
 	userRepository,
 } from "../repositories/index.js";
+import { logger } from "../utils/logger.js";
 import type {
 	ChangePasswordInput,
 	LoginInput,
@@ -156,7 +157,7 @@ export const blacklistRefreshToken = async (token: string): Promise<void> => {
 			}
 		}
 	} catch (error) {
-		console.error("Failed to parse and blacklist token:", error);
+		logger.error({ err: error }, "Failed to parse and blacklist token:");
 	}
 };
 
