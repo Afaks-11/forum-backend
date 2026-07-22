@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.config.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Lightweight, dependency-free HTTP Basic Authentication middleware
@@ -36,7 +37,7 @@ export const queueAuthMiddleware = (
 			return next();
 		}
 	} catch (err) {
-		console.error("Queue Auth decoding error:", err);
+		logger.error({ err }, "Queue Auth decoding error:");
 	}
 
 	res.setHeader("WWW-Authenticate", 'Basic realm="Queue Dashboard"');
