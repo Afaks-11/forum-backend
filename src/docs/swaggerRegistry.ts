@@ -39,6 +39,11 @@ import {
 	updateCommunitySchema,
 	updateRulesSchema,
 } from "../validators/community.validator.js";
+import { feedPostItemSchema } from "../validators/feed.validator.js";
+import {
+	DeepReadinessSchema,
+	HealthStatusSchema,
+} from "../validators/health.validator.js";
 import {
 	createPostSchema,
 	postFeedQuerySchema,
@@ -48,6 +53,7 @@ import {
 	postVotesDataSchema,
 	updatePostSchema,
 } from "../validators/post.validator.js";
+import { recommendedCommunityItemSchema } from "../validators/recommendation.validator.js";
 import {
 	profileCommentItemSchema,
 	profilePostItemSchema,
@@ -63,42 +69,7 @@ const commentsTag = "Comment Management Engine";
 const usersTag = "User Profiles & Social Graph";
 const uploadsTag = "Media & Asset Uploads";
 const recommendationTag = "Recommendations";
-
-const compactUserSchema = z.object({
-	username: z.string(),
-});
-
-const compactCommunitySchema = z.object({
-	name: z.string(),
-	slug: z.string(),
-});
-
-const feedPostItemSchema = z.object({
-	id: z.string().uuid(),
-	title: z.string(),
-	content: z.string(),
-	createdAt: z.date(),
-	deletedAt: z.date().nullable(),
-	isLocked: z.boolean(),
-	authorId: z.string().uuid(),
-	communityId: z.string().uuid(),
-	user: compactUserSchema,
-	community: compactCommunitySchema,
-	_count: z.object({
-		comment: z.number().int(),
-		votes: z.number().int(),
-	}),
-});
-
-const recommendedCommunityItemSchema = z.object({
-	id: z.string().uuid(),
-	name: z.string(),
-	slug: z.string(),
-	_count: z.object({
-		members: z.number().int(),
-		posts: z.number().int(),
-	}),
-});
+const healthTags = "Infrastructure";
 
 const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
 	type: "http",
@@ -1632,6 +1603,111 @@ registry.registerPath({
 				},
 			},
 		},
+	},
+});
+
+// HealthCheck
+registry.registerPath({
+	method: "get",
+	path: "/health/live",
+	summary: "Public runtime liveness probe check",
+	tags: [healthTags],
+	responses: {
+		200: {
+			description: "Runtime environment event loop is responsive",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						message: z.string(),
+					}),
+				},
+			},
+		},
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/health",
+	summary: "Basic application health diagnostics status",
+	tags: [healthTags],
+	security: [{ [bearerAuth.name]: [] }],
+	responses: {
+		200: {
+			description:
+				"Application system uptime diagnostics metrics returned successfully",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: HealthStatusSchema,
+					}),
+				},
+			},
+		},
+		401: {
+			description: "Unauthenticated access context missing token headers",
+		},
+		403: {
+			description: "Forbidden: Request context missing Admin permissions",
+		},
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/health/ready",
+	summary: "Deep dependency infrastructure readiness validation check",
+	tags: [healthTags],
+	security: [{ [bearerAuth.name]: [] }],
+	responses: {
+		200: {
+			description: "All critical backing subsystems are responsive and online",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: DeepReadinessSchema,
+					}),
+				},
+			},
+		},
+		503: {
+			description:
+				"One or more core network data services are currently degraded or unreachable",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: DeepReadinessSchema,
+					}),
+				},
+			},
+		},
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/metrics",
+	summary: "Expose Prometheus raw tracking performance telemetry",
+	tags: [healthTags],
+	security: [{ [bearerAuth.name]: [] }],
+	responses: {
+		200: {
+			description: "Plain text formatted OpenMetrics scraping pool dump",
+			content: {
+				"text/plain; version=0.0.4; charset=utf-8": {
+					schema: z.string().openapi({
+						example:
+							"# HELP process_cpu_user_seconds_total Total user CPU time spent...",
+					}),
+				},
+			},
+		},
+		401: { description: "Unauthenticated context" },
+		403: { description: "Forbidden" },
 	},
 });
 
