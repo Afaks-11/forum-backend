@@ -60,4 +60,8 @@ export const userSearchSchema = z.object({
 		.pipe(z.number().int().min(1).max(50)),
 });
 
+export const compactUserSchema = z.object({
+	username: z.string(),
+});
+
 export type UserSearchInput = z.infer<typeof userSearchSchema>;

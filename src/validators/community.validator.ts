@@ -186,6 +186,11 @@ export const communitySearchSchema = z.object({
 		.pipe(z.number().int().min(1).max(50)),
 });
 
+export const compactCommunitySchema = z.object({
+	name: z.string(),
+	slug: z.string(),
+});
+
 export type CommunitySearchInput = z.infer<typeof communitySearchSchema>;
 export type CreateCommunityInput = z.infer<typeof createCommunitySchema>;
 export type InviteToCommunityInput = z.infer<typeof inviteToCommunitySchema>;
