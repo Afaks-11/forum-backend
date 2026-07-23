@@ -7,7 +7,6 @@ export const castVote = async (data: CastVoteInput, userId: string) => {
 	if (!post) throw new Error("Post not found");
 
 	const existingVote = await voteRepository.findUniqueVote(userId, data.postId);
-
 	if (existingVote) {
 		if (existingVote.type === data.type) {
 			await voteRepository.deleteVote(existingVote.id);

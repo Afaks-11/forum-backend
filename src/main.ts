@@ -84,7 +84,7 @@ httpServer.listen(PORT, async () => {
 	try {
 		await initScheduledJobs();
 		logger.info(
-			" Repeatable background scheduled jobs successfully initialized!",
+			"Repeatable background scheduled jobs successfully initialized!",
 		);
 	} catch (error) {
 		logger.error(
