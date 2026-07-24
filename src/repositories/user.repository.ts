@@ -338,4 +338,34 @@ export class UserRepository {
 			},
 		});
 	}
+
+	/**
+	 * Atomically increases failed login milestones and conditionally applies lock timestamps
+	 * within an isolated transaction sequence to neutralize brute-force race conditions.
+	 */
+	async incrementLoginAttemptsAtomic(userId: string) {
+		return await this.prisma.$transaction(async (tx) => {
+			const user = await tx.user.findUnique({
+				where: { id: userId },
+				select: { loginAttempts: true },
+			});
+
+			if (!user) throw new Error("User profile target missing.");
+
+			const nextAttemptsCount = user.loginAttempts + 1;
+			const updatePayload: { loginAttempts: number; lockUntil?: Date } = {
+				loginAttempts: nextAttemptsCount,
+			};
+
+			// If threshold crossed, append the locked timestamp boundary inside the exact same transaction write
+			if (nextAttemptsCount >= 5) {
+				updatePayload.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+			}
+
+			return await tx.user.update({
+				where: { id: userId },
+				data: updatePayload,
+			});
+		});
+	}
 }
