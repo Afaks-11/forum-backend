@@ -1,0 +1,20 @@
+{
+	"$schema": "https://json.schemastore.org/swcrc",
+	"jsc": {
+		"target": "es2022",
+		"parser": {
+			"syntax": "typescript",
+			"tsx": false,
+			"decorators": false,
+			"dynamicImport": true
+		},
+		"transform": null,
+		"keepClassNames": true,
+		"loose": false,
+		"externalHelpers": false
+	},
+	"module": {
+		"type": "es6",
+		"lazy": false
+	}
+}
