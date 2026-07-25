@@ -26,7 +26,8 @@ export const registerUser = async (data: RegisterInput) => {
 		throw new AppError("Username or email already taken", 409);
 	}
 
-	const hashedPassword = await bcrypt.hash(data.password, 10);
+	const salt = await bcrypt.genSalt(10);
+	const hashedPassword = await bcrypt.hash(data.password, salt);
 	const verificationToken = crypto.randomBytes(32).toString("hex");
 
 	const newUser = await userRepository.create({
@@ -34,7 +35,7 @@ export const registerUser = async (data: RegisterInput) => {
 		passwordHash: hashedPassword,
 		verificationToken,
 	});
-	await emailQueue.add(`verify-amil:${newUser.id}`, {
+	await emailQueue.add(`verify-email:${newUser.id}`, {
 		to: newUser.email,
 		subject: "Verify Your Forum Account",
 		htmlContent: `<h1>Welcome ${newUser.username}!</h1>
@@ -47,49 +48,54 @@ export const registerUser = async (data: RegisterInput) => {
 
 export const loginUser = async (data: LoginInput) => {
 	const user = await userRepository.findByEmail(data.email);
-	if (!user) {
-		throw new AppError("Invalid email or password credentials", 400);
-	}
 
-	if (user.lockUntil && user.lockUntil > new Date()) {
+	// FIXED: Mitigate User Enumeration via Timing Attacks
+	const DUMMY_HASH =
+		"$2b$10$abcdefghijklmnopqrstuvwxyzA1234567890FakeHashForTimingDef";
+	const hashToValidate = user ? user.password : DUMMY_HASH;
+	const isPasswordValid = await bcrypt.compare(data.password, hashToValidate);
+
+	if (user?.lockUntil && user.lockUntil > new Date()) {
 		throw new AppError(
 			`Account temporarily locked. Please try again after ${user.lockUntil.toLocaleTimeString()}`,
 			423,
 		);
 	}
 
-	const isPasswordValid = await bcrypt.compare(data.password, user.password);
-	if (!isPasswordValid) {
-		const updatedAttempts = user.loginAttempts + 1;
-		let lockUntilTime: Date | null = null;
+	if (!user || !isPasswordValid) {
+		if (user) {
+			// The atomic execution wrapper applies thresholding and sets the lock window safely.
+			const updatedUser = await userRepository.incrementLoginAttemptsAtomic(
+				user.id,
+			);
 
-		if (updatedAttempts >= 5) {
-			lockUntilTime = new Date(Date.now() + 15 * 60 * 1000);
+			if (updatedUser.loginAttempts === 5) {
+				// Ensure the security notification fires exactly ONCE when crossing the limit
+				await emailQueue.add(`login-attempt-failed:${user.id}`, {
+					to: user.email,
+					subject: "Security Alert: Too many failed login attempts",
+					htmlContent: `<p>Your account has been locked for 15 minutes due to 5 consecutive failed login attempts.</p>`,
+				});
+			}
 
-			await emailQueue.add(`login-attemt-failed:${user.id}`, {
-				to: user.email,
-				subject: "Security Alert: Too many failed login attempts",
-				htmlContent: `<p>Your account has been locked for 15 minutes due to 5 consecutive failed login attempts.</p>`,
-			});
-
-			throw new AppError("Account locked due to multiple login failures.", 423);
+			if (updatedUser.loginAttempts >= 5) {
+				throw new AppError(
+					"Account locked due to multiple login failures.",
+					423,
+				);
+			}
 		}
-
-		await userRepository.updateLoginLockState(user.id, {
-			loginAttempts: updatedAttempts,
-			lockUntil: lockUntilTime,
-		});
-
-		throw new AppError("Invalid email or password credentials", 401);
+		throw new AppError("Invalid email or password credentials", 400);
 	}
 
 	if (!user.isEmailVerified) {
 		throw new AppError(
-			"Please check your inbox and verify your email to log in. ",
+			"Please check your inbox and verify your email to log in.",
 			403,
 		);
 	}
 
+	// Clear dynamic lockout rate limits on success path
 	await userRepository.updateLoginLockState(user.id, {
 		loginAttempts: 0,
 		lockUntil: null,
@@ -99,14 +105,18 @@ export const loginUser = async (data: LoginInput) => {
 		expiresIn: "15m",
 	});
 
-	const refreshToken = jwt.sign({ userId: user.id }, env.jwt.refreshSecret, {
-		expiresIn: "7d",
-	});
+	const refreshToken = jwt.sign(
+		{ userId: user.id },
+		env.jwt.refreshSecret + user.password,
+		{
+			expiresIn: "7d",
+		},
+	);
 
 	await emailQueue.add(`login-user:${user.id}`, {
 		to: user.email,
 		subject: "New Login Detected",
-		htmlContent: `<p>Hello ${user.username}, a new login was just recorded for your profile at ${new Date().toLocaleString()}.</p>`,
+		htmlContent: `<p>Hello ${user.username}, a new login was just recorded for your profile at ${new Date().toISOString()}.</p>`,
 	});
 
 	return {
@@ -122,16 +132,16 @@ export const refreshAccessToken = async (token: string) => {
 		throw new AppError("Invalid or expired refresh token", 401);
 	}
 	try {
-		const decoded = jwt.verify(token, env.jwt.refreshSecret) as {
+		const decoded = jwt.decode(token) as {
 			userId: string;
 		};
 
 		const user = await userRepository.findById(decoded.userId);
-
 		if (!user) {
 			throw new AppError("User no longer exists", 404);
 		}
 
+		jwt.verify(token, env.jwt.refreshSecret + user.password);
 		const newAccessToken = jwt.sign({ userId: user.id }, env.jwt.accessSecret, {
 			expiresIn: "15m",
 		});
@@ -173,7 +183,8 @@ export const updateUserProfile = async (
 ) => {
 	if (data.username) {
 		const taken = await userRepository.findByUsername(data.username);
-		if (taken && taken.id !== userId) throw new Error("Username already taken");
+		if (taken && taken.id !== userId)
+			throw new AppError("Username already taken", 409);
 	}
 	return await userRepository.updateProfile(userId, data);
 };
@@ -191,7 +202,8 @@ export const changeUserPassword = async (
 	const isValid = await bcrypt.compare(data.oldPassword, user.password);
 	if (!isValid) throw new AppError("Incorrect current password", 401);
 
-	const newHashedPassword = await bcrypt.hash(data.newPassword, 10);
+	const salt = await bcrypt.genSalt(10);
+	const newHashedPassword = await bcrypt.hash(data.newPassword, salt);
 	await userRepository.updatePassword(userId, newHashedPassword);
 };
 
@@ -239,7 +251,9 @@ export const processResetPassword = async (data: ResetPasswordInput) => {
 		throw new AppError("Invalid or expired password reset token", 401);
 	}
 
-	const hashedNewPassword = await bcrypt.hash(data.newPassword, 10);
+	const salt = await bcrypt.genSalt(10);
+	const hashedNewPassword = await bcrypt.hash(data.newPassword, salt);
+
 	await userRepository.resetPasswordAndClearTokens(user.id, hashedNewPassword);
 };
 
