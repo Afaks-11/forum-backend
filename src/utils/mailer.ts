@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { env } from "../config/env.config.js";
 import { logger } from "./logger.js";
 
 let transporter: Transporter | undefined;
@@ -8,17 +9,16 @@ const initMailer = async (): Promise<Transporter> => {
 		return transporter;
 	}
 
-	const testAccount = await nodemailer.createTestAccount();
-
 	transporter = nodemailer.createTransport({
-		host: "smtp.ethereal.email",
-		port: 587,
-		secure: false,
+		service: "gmail",
 		auth: {
-			user: testAccount.user,
-			pass: testAccount.pass,
+			user: env.smtp.smtp_user,
+			pass: env.smtp.smtp_pass,
 		},
 	});
+
+	await transporter.verify();
+	logger.info("SMTP connection established.");
 
 	return transporter;
 };
@@ -32,14 +32,15 @@ export const sendSystemEmail = async (
 		const mailClient = await initMailer();
 
 		const info = await mailClient.sendMail({
-			from: '"Forum Platform Security" <security@forumapp.com>',
+			from: env.smtp.smtp_from,
 			to,
 			subject,
 			html: htmlContent,
 		});
 
 		logger.info(
-			`Email sent! Preview URL: ${nodemailer.getTestMessageUrl(info)}`,
+			{ messagedId: info.messagedId, recipient: to },
+			"Email sent successfully.",
 		);
 	} catch (error) {
 		logger.error({ err: error }, "Critical: Failed to deliver email alert:");

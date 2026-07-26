@@ -16,3 +16,6 @@ process.env.CLOUDINARY_API_KEY = "mock_api_key";
 process.env.CLOUDINARY_API_SECRET = "mock_api_secret";
 process.env.BULL_BOARD_USERNAME = "mock_admin";
 process.env.BULL_BOARD_PASSWORD = "mock_secure_password";
+process.env.SMTP_USER = "test@gmail.com";
+process.env.SMTP_PASS = "qetk adss fhsa cnff";
+process.env.SMTP_FROM = "Forum Platform Security <test@gmail.com>";

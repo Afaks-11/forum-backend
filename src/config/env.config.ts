@@ -34,4 +34,9 @@ export const env = {
 		username: getEnvOrThrow("BULL_BOARD_USERNAME"),
 		password: getEnvOrThrow("BULL_BOARD_PASSWORD"),
 	},
+	smtp: {
+		smtp_user: getEnvOrThrow("SMTP_USER"),
+		smtp_pass: getEnvOrThrow("SMTP_PASS"),
+		smtp_from: getEnvOrThrow("SMTP_FROM"),
+	},
 } as const;

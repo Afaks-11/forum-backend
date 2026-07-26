@@ -39,8 +39,7 @@ export const registerUser = async (data: RegisterInput) => {
 		to: newUser.email,
 		subject: "Verify Your Forum Account",
 		htmlContent: `<h1>Welcome ${newUser.username}!</h1>
-     <p>Please confirm your account by using the following secure token:</p>
-     <code style="background:#f4f4f4; padding:5px 10px; display:inline-block;">${verificationToken}</code>`,
+     <p>Please confirm your account by using the following secure token: ${verificationToken}</p>`,
 	});
 
 	return newUser;
@@ -132,11 +131,11 @@ export const refreshAccessToken = async (token: string) => {
 		throw new AppError("Invalid or expired refresh token", 401);
 	}
 	try {
-		const decoded = jwt.decode(token) as {
+		const payload = jwt.verify(token, env.jwt.refreshSecret) as {
 			userId: string;
 		};
 
-		const user = await userRepository.findById(decoded.userId);
+		const user = await userRepository.findById(payload.userId);
 		if (!user) {
 			throw new AppError("User no longer exists", 404);
 		}
