@@ -1,0 +1,26 @@
+export function createFakeComment(overrides = {}) {
+	return {
+		id: "cmnt_789",
+		content: "This is an insightful comment about TypeScript.",
+		postId: "post_123",
+		authorId: "usr_123",
+		parentId: null,
+		isLocked: false,
+		isEdited: false,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+		deletedAt: null,
+		user: { id: "usr_123", username: "code_reviewer" },
+		...overrides,
+	};
+}
+
+export function createFakePostPayload(overrides = {}) {
+	return {
+		id: "post_123",
+		title: "Mastering TypeScript Architecture",
+		authorId: "usr_owner",
+		isLocked: false,
+		...overrides,
+	};
+}
