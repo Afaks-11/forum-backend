@@ -36,6 +36,11 @@ enum NotificationType {
   COMMUNITY_INVITE
 }
 
+enum PostType {
+  TEXT
+  LINK
+}
+
 model User {
   id  String @id @default(uuid())
   username String @unique
@@ -60,7 +65,7 @@ model User {
   posts Post[]
   communities Community[] @relation("CommunityOwner")
   memberships Membership[]
-  comment Comment[]
+  comments Comment[]
   votes Vote[]
   following Follow[] @relation("UserFollows")
   followers Follow[] @relation("UserFollowedBy")
@@ -119,6 +124,8 @@ model Post {
   
   savedBy     SavedPost[]
   reports     Report[]
+
+  type PostType @default(TEXT)
 
   authorId String
   user User @relation(fields: [authorId], references:[id])
