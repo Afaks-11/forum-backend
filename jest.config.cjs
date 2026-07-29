@@ -7,7 +7,7 @@ module.exports = {
 
 	injectGlobals: false,
 
-	setupFiles: ["<rootDir>/tests/setup.ts"],
+	setupFiles: ["<rootDir>/tests/setup-env.ts"],
 
 	// CRITICAL: Resolve .js extension imports back to .ts files for ESM.
 	moduleNameMapper: {
