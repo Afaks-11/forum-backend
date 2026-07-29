@@ -4,17 +4,46 @@ import { logger } from "./logger.js";
 
 class RedisService {
 	private client: Redis;
+	private url: string;
 
 	constructor() {
-		this.client = new Redis(env.redis.url, {
+		this.url = env.redis.url;
+		this.client = this.createClient(this.url);
+	}
+
+	private createClient(url: string): Redis {
+		const client = new Redis(url, {
 			maxRetriesPerRequest: 3,
 		});
-		this.client.on("connect", () =>
-			logger.info("Redis connection established."),
-		);
-		this.client.on("error", (err) =>
+		client.on("connect", () => logger.info("Redis connection established."));
+		client.on("error", (err) =>
 			logger.error({ err }, "Redis connection error: "),
 		);
+		return client;
+	}
+
+	/**
+	 * Recreate the Redis client with a new URL.
+	 * Call this when the Redis endpoint changes (e.g., Testcontainers restart).
+	 */
+	reconnect(url?: string): void {
+		const targetUrl = url || this.url;
+		if (!targetUrl) {
+			logger.warn("Redis reconnect called without a URL");
+			return;
+		}
+
+		try {
+			if (this.client) {
+				this.client.removeAllListeners();
+				this.client.quit().catch(() => {});
+			}
+		} catch {
+			// ignore cleanup errors
+		}
+
+		this.url = targetUrl;
+		this.client = this.createClient(targetUrl);
 	}
 
 	/**
@@ -106,6 +135,14 @@ class RedisService {
 				{ err: error, searchPattern: pattern },
 				`Redis batch pattern deletion failed`,
 			);
+		}
+	}
+
+	async flushdb(): Promise<void> {
+		try {
+			await this.client.flushdb();
+		} catch (error) {
+			logger.error({ err: error }, "Redis FLUSHDB error");
 		}
 	}
 }
