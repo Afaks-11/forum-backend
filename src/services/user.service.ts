@@ -160,4 +160,6 @@ export const searchForUsers = async (data: UserSearchInput) => {
 
 	const users = await userRepository.searchUsers(data.query, data.limit);
 	await redis.set(cacheKey, users, cachedDurationSeconds);
+
+	return users;
 };

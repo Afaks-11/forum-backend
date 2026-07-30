@@ -20,8 +20,8 @@ const router = express.Router();
 
 router.get("/", getActivePosts);
 router.get("/search", handlePostSearch);
-router.get("/:id", getPost);
 router.get("/feed", handleGetFeed);
+router.get("/:id", getPost);
 
 router.post("/", requireAuth, create);
 router.patch("/:id", requireAuth, patchPost);

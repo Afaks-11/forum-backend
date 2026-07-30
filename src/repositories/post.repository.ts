@@ -14,6 +14,7 @@ export class PostRepository {
 				content: data.content,
 				authorId: authorId,
 				communityId: data.communityId,
+				type: data.type,
 			},
 		});
 	}
