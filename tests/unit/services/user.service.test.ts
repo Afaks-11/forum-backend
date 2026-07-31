@@ -404,8 +404,7 @@ describe("User Service Unit Test Suite", () => {
 				databaseHits,
 				300,
 			);
-			// Matches structural configuration where no value is explicitly returned on cache misses
-			expect(result).toBeUndefined();
+			expect(result).toEqual(databaseHits);
 		});
 	});
 });
