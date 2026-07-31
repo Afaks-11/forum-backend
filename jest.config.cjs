@@ -19,6 +19,7 @@ module.exports = {
 	transform: {
 		"^.+\\.tsx?$": "@swc/jest",
 	},
+	testMatch: ["<rootDir>/tests/unit/**/*.test.ts"],
 
 	// Prevent mock state leakage across tests.
 	clearMocks: true,
