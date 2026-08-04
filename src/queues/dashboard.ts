@@ -5,22 +5,24 @@ import { cronQueue } from "./cron.queue.js";
 import { emailQueue } from "./email.queue.js";
 import { notificationQueue } from "./notification.queue.js";
 
-const serverAdapter = new ExpressAdapter();
+let serverAdapter: ExpressAdapter | null = null;
 
-serverAdapter.setBasePath("/admin/queues");
+export const getQueueDashboardAdapter = (): ExpressAdapter => {
+	if (!serverAdapter) {
+		serverAdapter = new ExpressAdapter();
+		serverAdapter.setBasePath("/admin/queues");
 
-createBullBoard({
-	queues: [
-		new BullMQAdapter(emailQueue),
-		new BullMQAdapter(notificationQueue),
-		new BullMQAdapter(cronQueue),
-	],
-	serverAdapter: serverAdapter,
-	options: {
-		uiConfig: {
-			boardTitle: "Forum Core Queues",
-		},
-	},
-});
-
-export { serverAdapter as queueDashboardAdapter };
+		createBullBoard({
+			queues: [
+				new BullMQAdapter(emailQueue),
+				new BullMQAdapter(notificationQueue),
+				new BullMQAdapter(cronQueue),
+			],
+			serverAdapter,
+			options: {
+				uiConfig: { boardTitle: "Forum Core Queues" },
+			},
+		});
+	}
+	return serverAdapter;
+};

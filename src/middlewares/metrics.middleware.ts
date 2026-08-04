@@ -8,10 +8,10 @@ export const metricsMiddleware = (
 	req: Request,
 	res: Response,
 	next: NextFunction,
-): void => {
+) => {
 	// Exclude the metrics endpoint itself to prevent data skew from telemetry scrapes
 	if (req.originalUrl === "/metrics" || req.url === "/metrics") {
-		next();
+		return next();
 	}
 
 	const startTime = process.hrtime();

@@ -21,7 +21,7 @@ export const cronWorker = new Worker<CronJobData>(
 
 				const result = await prisma.notification.deleteMany({
 					where: {
-						read: true,
+						isRead: true,
 						createdAt: { lt: thirtyDaysAgo },
 					},
 				});

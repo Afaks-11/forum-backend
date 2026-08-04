@@ -25,6 +25,9 @@ class RedisService {
 	/**
 	 * Recreate the Redis client with a new URL.
 	 * Call this when the Redis endpoint changes (e.g., Testcontainers restart).
+	 *
+	 * IMPORTANT: This does NOT rewire BullMQ queues or Socket.IO adapters.
+	 * Those must be re-initialized separately after this call.
 	 */
 	reconnect(url?: string): void {
 		const targetUrl = url || this.url;
@@ -36,7 +39,10 @@ class RedisService {
 		try {
 			if (this.client) {
 				this.client.removeAllListeners();
-				this.client.quit().catch(() => {});
+				// quit() drains the command queue; if the old endpoint is already
+				// unreachable it rejects, so fall back to disconnect() to guarantee
+				// the socket and its retry timer are actually released.
+				this.client.quit().catch(() => this.client.disconnect());
 			}
 		} catch {
 			// ignore cleanup errors
@@ -44,6 +50,25 @@ class RedisService {
 
 		this.url = targetUrl;
 		this.client = this.createClient(targetUrl);
+	}
+
+	/**
+	 * Close the underlying connection and stop its reconnection timer.
+	 *
+	 * Required for a clean process exit. Without it ioredis keeps the event loop
+	 * alive and — once the endpoint disappears (SIGTERM in production, a stopped
+	 * Testcontainer in tests) — retries forever, emitting ECONNREFUSED on every
+	 * attempt. Listeners are removed first so teardown stays quiet without
+	 * suppressing the error logging that matters at runtime.
+	 */
+	async disconnect(): Promise<void> {
+		this.client.removeAllListeners();
+		try {
+			await this.client.quit();
+		} catch {
+			// Endpoint already gone: drop the socket instead of reconnecting.
+			this.client.disconnect();
+		}
 	}
 
 	/**

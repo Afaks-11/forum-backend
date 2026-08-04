@@ -5,8 +5,11 @@ import { createServer } from "node:http";
 import app from "./app.js";
 import { env } from "./config/env.config.js";
 import { initScheduledJobs } from "./queues/cron.queue.js";
+import { closeAllQueues } from "./queues/index.js";
 import { initSocketServer } from "./socket/socket.server.js";
 import { logger } from "./utils/logger.js";
+import { prisma } from "./utils/prisma.js";
+import { redis } from "./utils/redis.js";
 
 import "./workers/email.worker.js";
 import "./workers/notification.worker.js";
@@ -39,19 +42,49 @@ async function bootstrap() {
 }
 
 function registerShutdown() {
+	let shuttingDown = false;
+
+	/**
+	 * Close resources in dependency order: stop accepting traffic, then drain
+	 * background work, then release the datastores. Previously only the HTTP
+	 * server was closed, so Redis, BullMQ and Prisma handles kept the event loop
+	 * alive and ioredis retried against a terminated endpoint, emitting
+	 * ECONNREFUSED on every attempt until the process was force-killed.
+	 */
 	const shutdown = async (signal: string) => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+
 		logger.info(`${signal} received. Shutting down...`);
 
-		httpServer.close((err) => {
-			if (err) {
-				logger.error({ err }, "Error while closing HTTP server.");
-				process.exit(1);
-			}
+		// Force exit if a hung connection prevents graceful teardown.
+		const forceExit = setTimeout(() => {
+			logger.error("Graceful shutdown timed out. Forcing exit.");
+			process.exit(1);
+		}, 10_000);
+		forceExit.unref();
 
+		try {
+			await new Promise<void>((resolve, reject) => {
+				httpServer.close((err) => (err ? reject(err) : resolve()));
+			});
 			logger.info("HTTP server closed.");
 
+			await closeAllQueues();
+			logger.info("Queue connections closed.");
+
+			await redis.disconnect();
+			logger.info("Redis connection closed.");
+
+			await prisma.$disconnect();
+			logger.info("Database connection closed.");
+
+			clearTimeout(forceExit);
 			process.exit(0);
-		});
+		} catch (error) {
+			logger.error({ err: error }, "Error during graceful shutdown.");
+			process.exit(1);
+		}
 	};
 
 	process.on("SIGINT", () => void shutdown("SIGINT"));

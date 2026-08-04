@@ -20,6 +20,7 @@ export class TokenBlacklistRepository {
 	 * Check if a token is registered on our blacklist
 	 */
 	async isBlacklisted(token: string): Promise<boolean> {
-		return await redis.exists(`${this.PREFIX}${token}`);
+		const result = await redis.exists(`${this.PREFIX}${token}`);
+		return Boolean(result);
 	}
 }
