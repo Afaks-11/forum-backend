@@ -1,48 +1,70 @@
 
 services:
   api:
-    build: 
+    build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ./Dockerfile
+      target: production
     container_name: forum_api
-    ports: 
-      - "${API_PORT:-5000}:3000"
+    restart: unless-stopped
     env_file:
       - .env.docker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-forum_user}:${POSTGRES_PASSWORD:-forum_password}@forum-postgres:5432/${POSTGRES_DB:-forum_db}?schema=public
+      REDIS_URL: redis://forum-redis:6379
+    ports:
+      - "${API_PORT:-5000}:3000"
     depends_on:
-      forum-postgres: 
+      forum-postgres:
         condition: service_healthy
-      forum-redis: 
+      forum-redis:
         condition: service_healthy
-    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   forum-postgres:
     image: postgres:17-alpine
     container_name: forum-postgres
-    ports: 
-      - "127.0.0.1:${DB_EXPOSED_PORT:-5433}:5432"
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: forum_user
-      POSTGRES_PASSWORD: forum_password
-      POSTGRES_DB: forum_db
+      POSTGRES_USER: ${POSTGRES_USER:-forum_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forum_password}
+      POSTGRES_DB: ${POSTGRES_DB:-forum_db}
+    ports:
+      - "127.0.0.1:${DB_EXPOSED_PORT:-5433}:5432"
     volumes:
       - forum_postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck: 
-      test: ["CMD-SHELL", "pg_isready -U forum_user -d forum_db"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-forum_user} -d ${POSTGRES_DB:-forum_db}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
   forum-redis:
-    image: redis:7.0.15
+    image: redis:7-alpine
     container_name: forum-redis
-    ports: 
+    restart: unless-stopped
+    # Append-only persistence so queued BullMQ jobs survive a container restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
       - "127.0.0.1:${REDIS_EXPOSED_PORT:-6380}:6379"
-    volumes: 
+    volumes:
       - forum_redis_data:/data
-    healthcheck: 
+    healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
