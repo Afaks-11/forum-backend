@@ -114,7 +114,8 @@ export const postVotesDataSchema = z
 	.object({
 		upvotes: z.number(),
 		downvotes: z.number(),
-		userVote: z.enum(["UPVOTE", "DOWNVOTE"]).nullable(),
+		score: z.number(),
+		currentUserVote: z.enum(["UPVOTE", "DOWNVOTE"]).nullable(),
 	})
 	.openapi("PostVotesData");
 

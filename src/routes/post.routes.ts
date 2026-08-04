@@ -1,5 +1,4 @@
 import express from "express";
-import { handleGetFeed } from "../controllers/feed.controller.js";
 import {
 	create,
 	getActivePosts,
@@ -20,14 +19,13 @@ const router = express.Router();
 
 router.get("/", getActivePosts);
 router.get("/search", handlePostSearch);
-router.get("/feed", handleGetFeed);
+router.get("/:id/votes", optionalAuth, getVotesData);
 router.get("/:id", getPost);
 
 router.post("/", requireAuth, create);
 router.patch("/:id", requireAuth, patchPost);
 router.delete("/:id", requireAuth, removePost);
 
-router.get("/posts/:id/votes", optionalAuth, getVotesData);
 router.post("/:id/save", requireAuth, savePost);
 router.delete("/:id/save", requireAuth, unsavePost);
 

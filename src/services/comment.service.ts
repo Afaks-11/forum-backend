@@ -96,7 +96,7 @@ export const softDeleteComment = async (commentId: string, userId: string) => {
 	if (!comment || comment.deletedAt)
 		throw new AppError("Comment not found", 404);
 	if (comment.authorId !== userId)
-		throw new AppError("Unauthorized to delete this comment", 401);
+		throw new AppError("Forbidden: You do not own this comment", 403);
 
 	return await commentRepository.softDelete(commentId);
 };

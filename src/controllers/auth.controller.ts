@@ -118,7 +118,7 @@ export const updateUserDetails = asyncHandler(async (req, res) => {
 		userId,
 	);
 
-	res.status(201).json({
+	res.status(200).json({
 		success: true,
 		data: {
 			updatedUserProfileDetails,
@@ -137,7 +137,7 @@ export const updateUserPassword = asyncHandler(async (req, res) => {
 	const validatedData = changePasswordSchema.parse(req.body);
 
 	await changeUserPassword(validatedData, userId);
-	res.status(201).json({
+	res.status(200).json({
 		success: true,
 		message: "Password updated successfully",
 	});

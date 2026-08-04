@@ -1,6 +1,4 @@
 import express from "express";
-import { requireAuth } from "../middlewares/auth.middleware.js";
-import { requireAdmin } from "../middlewares/role.middleware.js";
 import { cronQueue } from "../queues/cron.queue.js";
 import { getIO } from "../socket/socket.server.js";
 import { logger } from "../utils/logger.js";
@@ -15,7 +13,7 @@ const router = express.Router();
  *   get:
  *     description: Returns overall application bootstrap confirmation.
  */
-router.get("/", requireAuth, requireAdmin, (_req, res) => {
+router.get("/", (_req, res) => {
 	res.status(200).json({
 		status: "UP",
 		timestamp: new Date().toISOString(),
@@ -39,7 +37,7 @@ router.get("/live", (_req, res) => {
  *   get:
  *     description: Deep readiness verification checking all supporting backend infra dependencies.
  */
-router.get("/ready", requireAuth, requireAdmin, async (_req, res) => {
+router.get("/ready", async (_req, res) => {
 	const healthStatus = {
 		status: "UP",
 		timestamp: new Date().toISOString(),

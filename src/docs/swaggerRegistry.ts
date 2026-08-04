@@ -162,7 +162,7 @@ registry.registerPath({
 		body: { content: { "application/json": { schema: updateMeSchema } } },
 	},
 	responses: {
-		201: {
+		200: {
 			description: "Profile modified successfully",
 			content: { "application/json": { schema: profileResponseWrapper } },
 		},
@@ -181,7 +181,7 @@ registry.registerPath({
 		body: { content: { "application/json": { schema: changePasswordSchema } } },
 	},
 	responses: {
-		201: {
+		200: {
 			description: "Password swapped successfully",
 			content: { "application/json": { schema: genericResponseSchema } },
 		},
@@ -1014,7 +1014,7 @@ registry.registerPath({
 	tags: [postsTag],
 	request: {
 		query: z.object({
-			q: z.string().min(1).openapi({
+			query: z.string().min(1).openapi({
 				description: "Keywords to match against title or content",
 				example: "typescript errors",
 			}),
@@ -1067,7 +1067,7 @@ registry.registerPath({
 
 registry.registerPath({
 	method: "get",
-	path: "/posts/feed",
+	path: "/feed",
 	summary:
 		"Fetch advanced chronologically sorted or algorithmically ranked global/contextual post feeds",
 	tags: [postsTag],
@@ -1477,7 +1477,7 @@ registry.registerPath({
 //Upload
 registry.registerPath({
 	method: "get",
-	path: "/uploads/signature",
+	path: "/upload/signature",
 	summary: "Generate a secure direct-to-cloud upload signature",
 	description:
 		"Returns cryptographic credentials allowing the client to upload a file directly to Cloudinary without passing through the Node server.",

@@ -99,7 +99,7 @@ export const softDeletePost = async (postId: string, userId: string) => {
 	const post = await postRepository.findUniqueById(postId);
 	if (!post) throw new AppError("Post not found", 404);
 	if (post.authorId !== userId)
-		throw new AppError("Unauthorized to delete this post", 401);
+		throw new AppError("Unauthorized to delete this post", 403);
 
 	const result = await postRepository.softDelete(postId);
 
@@ -164,7 +164,7 @@ export const modifyPostModerationState = async (
 			const isModOrAdmin =
 				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
 			if (post.authorId !== userId && !isModOrAdmin) {
-				throw new AppError("Unauthorized action", 401);
+				throw new AppError("Forbidden: insufficient privileges", 403);
 			}
 			const updated = await postRepository.updateLockStatus(postId, isLocked);
 
@@ -183,6 +183,15 @@ export const modifyPostModerationState = async (
 		}
 
 		case "PIN": {
+			const caller = await prisma.user.findUnique({
+				where: { id: userId },
+				select: { role: true },
+			});
+			const isModOrAdmin =
+				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
+			if (!isModOrAdmin) {
+				throw new AppError("Forbidden: Moderator privileges required", 403);
+			}
 			const updated = await postRepository.updatePinStatus(postId, isPinned);
 			await redis.del(`post:${postId}`);
 			await redis.delPattern("feed:advanced:*");
