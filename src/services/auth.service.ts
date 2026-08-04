@@ -29,11 +29,13 @@ export const registerUser = async (data: RegisterInput) => {
 	const salt = await bcrypt.genSalt(10);
 	const hashedPassword = await bcrypt.hash(data.password, salt);
 	const verificationToken = crypto.randomBytes(32).toString("hex");
+	const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 	const newUser = await userRepository.create({
 		...data,
 		passwordHash: hashedPassword,
 		verificationToken,
+		verificationTokenExpires,
 	});
 	await emailQueue.add(`verify-email:${newUser.id}`, {
 		to: newUser.email,
@@ -87,6 +89,10 @@ export const loginUser = async (data: LoginInput) => {
 		throw new AppError("Invalid email or password credentials", 400);
 	}
 
+	if (user.deletedAt) {
+		throw new AppError("Invalid email or password credentials", 400);
+	}
+
 	if (!user.isEmailVerified) {
 		throw new AppError(
 			"Please check your inbox and verify your email to log in.",
@@ -112,12 +118,15 @@ export const loginUser = async (data: LoginInput) => {
 		},
 	);
 
-	await emailQueue.add(`login-user:${user.id}`, {
-		to: user.email,
-		subject: "New Login Detected",
-		htmlContent: `<p>Hello ${user.username}, a new login was just recorded for your profile at ${new Date().toISOString()}.</p>`,
-	});
-
+	await emailQueue
+		.add(`login-user:${user.id}`, {
+			to: user.email,
+			subject: "New Login Detected",
+			htmlContent: `<p>Hello ${user.username}, a new login was recorded at ${new Date().toISOString()}.</p>`,
+		})
+		.catch((err) =>
+			logger.error({ err }, "Failed to queue login notification"),
+		);
 	return {
 		user: { id: user.id, username: user.username, email: user.email },
 		accessToken,
@@ -131,12 +140,16 @@ export const refreshAccessToken = async (token: string) => {
 		throw new AppError("Invalid or expired refresh token", 401);
 	}
 	try {
-		const payload = jwt.verify(token, env.jwt.refreshSecret) as {
+		const decoded = jwt.decode(token) as {
 			userId: string;
-		};
+		} | null;
 
-		const user = await userRepository.findById(payload.userId);
-		if (!user) {
+		if (!decoded?.userId) {
+			throw new AppError("Invalid or expired refresh token", 401);
+		}
+
+		const user = await userRepository.findById(decoded.userId);
+		if (!user || user.deletedAt) {
 			throw new AppError("User no longer exists", 404);
 		}
 
@@ -189,7 +202,7 @@ export const updateUserProfile = async (
 };
 
 export const deleteUserAccount = async (userId: string) => {
-	return await userRepository.delete(userId);
+	return await userRepository.softDelete(userId);
 };
 export const changeUserPassword = async (
 	data: ChangePasswordInput,
@@ -208,7 +221,7 @@ export const changeUserPassword = async (
 
 export const processForgotPassword = async (email: string) => {
 	const user = await userRepository.findByEmail(email);
-	if (!user) return;
+	if (!user || user.deletedAt) return;
 
 	const resetToken = crypto.randomBytes(32).toString("hex");
 	const expires = new Date(Date.now() + 15 * 60 * 1000);
@@ -228,12 +241,20 @@ export const processForgotPassword = async (email: string) => {
 
 export const resendVerificationToken = async (email: string) => {
 	const user = await userRepository.findByEmail(email);
-	if (!user) throw new AppError("User not found", 404);
-	if (user.isEmailVerified)
-		throw new AppError("Account is already verified", 409);
+
+	// Do not reveal whether an account exists or is already verified: return
+	// silently so the generic controller response can't be used for enumeration.
+	if (!user || user.deletedAt || user.isEmailVerified) return;
 
 	const newVerificationToken = crypto.randomBytes(32).toString("hex");
-	await userRepository.updateVerificationToken(user.id, newVerificationToken);
+	const newVerificationTokenExpires = new Date(
+		Date.now() + 24 * 60 * 60 * 1000,
+	);
+	await userRepository.updateVerificationToken(
+		user.id,
+		newVerificationToken,
+		newVerificationTokenExpires,
+	);
 
 	await emailQueue.add(`resent-verification-token:${user.id}`, {
 		to: user.email,
@@ -259,5 +280,11 @@ export const processResetPassword = async (data: ResetPasswordInput) => {
 export const verifyUserEmail = async (token: string) => {
 	const user = await userRepository.findByVerifyToken(token);
 	if (!user) throw new AppError("Invalid or expired verification token", 401);
+	if (
+		!user.verificationTokenExpires ||
+		user.verificationTokenExpires < new Date()
+	) {
+		throw new AppError("Verification token has expired", 401);
+	}
 	await userRepository.verifyEmailStatus(user.id);
 };

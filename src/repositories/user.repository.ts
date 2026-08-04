@@ -22,7 +22,11 @@ export class UserRepository {
 	 * Register a new user with specific select fields returned
 	 */
 	async create(
-		data: RegisterInput & { passwordHash: string; verificationToken: string },
+		data: RegisterInput & {
+			passwordHash: string;
+			verificationToken: string;
+			verificationTokenExpires: Date;
+		},
 	) {
 		return await this.prisma.user.create({
 			data: {
@@ -30,6 +34,7 @@ export class UserRepository {
 				email: data.email,
 				password: data.passwordHash,
 				emailVerifyToken: data.verificationToken,
+				verificationTokenExpires: data.verificationTokenExpires,
 			},
 			select: {
 				id: true,
@@ -126,11 +131,14 @@ export class UserRepository {
 	}
 
 	/**
-	 * Hard-delete a user profile from the database
+	 * Soft-delete a user profile by stamping deletedAt.
+	 * A hard delete would violate foreign keys because posts, comments, votes,
+	 * memberships and owned communities reference the user without cascade rules.
 	 */
-	async delete(id: string) {
-		return await this.prisma.user.delete({
+	async softDelete(id: string) {
+		return await this.prisma.user.update({
 			where: { id },
+			data: { deletedAt: new Date() },
 		});
 	}
 
@@ -175,12 +183,20 @@ export class UserRepository {
 	}
 
 	/**
-	 * Update or cycle a user's verification token
+	 * Update or cycle a user's verification token.
+	 *
+	 * The expiry is rotated with the token, never independently: issuing a fresh
+	 * token while leaving a lapsed `verificationTokenExpires` in place would make
+	 * the new token dead on arrival and lock the account out of verification.
 	 */
-	async updateVerificationToken(id: string, emailVerifyToken: string | null) {
+	async updateVerificationToken(
+		id: string,
+		emailVerifyToken: string | null,
+		verificationTokenExpires: Date | null,
+	) {
 		return await this.prisma.user.update({
 			where: { id },
-			data: { emailVerifyToken },
+			data: { emailVerifyToken, verificationTokenExpires },
 		});
 	}
 
@@ -190,7 +206,11 @@ export class UserRepository {
 	async verifyEmailStatus(id: string) {
 		return await this.prisma.user.update({
 			where: { id },
-			data: { isEmailVerified: true, emailVerifyToken: null },
+			data: {
+				isEmailVerified: true,
+				emailVerifyToken: null,
+				verificationTokenExpires: null,
+			},
 		});
 	}
 
@@ -333,8 +353,10 @@ export class UserRepository {
 			take: limit,
 			select: {
 				username: true,
-				avatar: true,
-				displayName: true,
+				following: true,
+				followers: true,
+				posts: true,
+				communities: true,
 			},
 		});
 	}
