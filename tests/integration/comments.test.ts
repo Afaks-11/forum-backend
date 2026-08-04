@@ -1,20 +1,9 @@
 import crypto from "node:crypto";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "@jest/globals";
+import { beforeAll, describe, expect, it } from "@jest/globals";
 import supertest from "supertest";
 import { getTestApp } from "../helpers/app.js";
 import { generateAccessToken } from "../helpers/auth.js";
-import {
-	closeTestDatabase,
-	getTestDatabase,
-	truncateTables,
-} from "../helpers/database.js";
+import { getTestDatabase } from "../helpers/database.js";
 
 let request: supertest.Agent;
 let db: ReturnType<typeof getTestDatabase>;
@@ -23,14 +12,6 @@ beforeAll(async () => {
 	const app = await getTestApp();
 	request = supertest(app);
 	db = getTestDatabase();
-});
-
-beforeEach(async () => {
-	await truncateTables(db);
-});
-
-afterAll(async () => {
-	await closeTestDatabase().catch(() => {});
 });
 
 const createUser = () =>
@@ -263,7 +244,7 @@ describe("DELETE /api/v1/comments/:id", () => {
 		expect(deleted?.deletedAt).not.toBeNull();
 	});
 
-	it("should return 401 when non-author tries to delete", async () => {
+	it("should return 403 when non-author tries to delete", async () => {
 		const author = await createUser();
 		const hacker = await createUser();
 		const community = await createCommunity(author.id);
@@ -275,7 +256,8 @@ describe("DELETE /api/v1/comments/:id", () => {
 			.delete(`/api/v1/comments/${comment.id}`)
 			.set("Authorization", `Bearer ${token}`);
 
-		expect(res.status).toBe(401);
+		// Authenticated caller, wrong owner: authorization failure, not authentication.
+		expect(res.status).toBe(403);
 	});
 
 	it("should return 404 for missing comment", async () => {

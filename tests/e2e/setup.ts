@@ -3,13 +3,13 @@ import {
 	initTestLifecycle,
 	resetDatastores,
 	teardownTestLifecycle,
-} from "./helpers/lifecycle.js";
+} from "../helpers/lifecycle.js";
 
 /**
- * Per-worker lifecycle for the integration suite.
+ * Per-worker lifecycle for the E2E suite.
  *
- * Containers and schema are owned by Jest's globalSetup, so this file only
- * manages the worker's own cleanup client and per-test isolation.
+ * Identical in shape to the integration setup by design: both delegate to the
+ * shared lifecycle helper so there is one implementation of reset and teardown.
  */
 beforeAll(() => {
 	initTestLifecycle();

@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
+import { AppError } from "../../../src/errors/AppError.js";
 
 // Module Level Infrastructure Mocks typed safely using 'unknown'
 const mockPostRepository = {
@@ -12,10 +13,20 @@ const mockVoteRepository = {
 	deleteVote: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
+const mockRedis = {
+	delPattern: jest.fn<(...args: unknown[]) => Promise<void>>(),
+};
+
 // Isolate ES Modules prior to test environment execution
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	postRepository: mockPostRepository,
 	voteRepository: mockVoteRepository,
+}));
+// Without this the real client module is loaded and opens a live ioredis
+// connection during a unit run, which is the ECONNREFUSED/open-handle failure
+// mode the other service suites already guard against.
+await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
+	redis: mockRedis,
 }));
 
 // Resolve targeted operations under testing
@@ -23,13 +34,20 @@ const { castVote } = await import("../../../src/services/vote.service.js");
 
 describe("Vote Service Unit Test Suite", () => {
 	describe("castVote", () => {
-		it("Business Rule (Post Not Found): should reject execution with a generic Error if target post metadata is missing", async () => {
+		it("Business Rule (Post Not Found): should reject execution with a 404 AppError if target post metadata is missing", async () => {
 			mockPostRepository.findById.mockReset();
 			mockPostRepository.findById.mockResolvedValue(null);
 
+			// `toThrow(new Error(...))` compares only the message, so it stayed green
+			// after the service switched to AppError. Assert the type and status code
+			// too — the HTTP status is the contract the error handler depends on.
 			await expect(
 				castVote({ postId: "missing_post_id", type: "UPVOTE" }, "usr_123"),
-			).rejects.toThrow(new Error("Post not found"));
+			).rejects.toThrow(new AppError("Post not found", 404));
+
+			await expect(
+				castVote({ postId: "missing_post_id", type: "UPVOTE" }, "usr_123"),
+			).rejects.toMatchObject({ statusCode: 404 });
 
 			expect(mockPostRepository.findById).toHaveBeenCalledWith(
 				"missing_post_id",
@@ -63,6 +81,12 @@ describe("Vote Service Unit Test Suite", () => {
 			);
 			expect(mockVoteRepository.deleteVote).toHaveBeenCalledWith("vt_777");
 			expect(result).toEqual({ action: "REMOVED" });
+			// The tally changed, so every viewer's cached copy of the metrics for
+			// this post must be dropped. `getPostVoteMetrics` keys the cache per
+			// viewer, hence the wildcard rather than a single del.
+			expect(mockRedis.delPattern).toHaveBeenCalledWith(
+				"post:post_123:vote_metrics:*",
+			);
 		});
 
 		it("Happy Path (Vote Transition / Modification): should update the existing registry entry if types flip", async () => {
@@ -98,6 +122,9 @@ describe("Vote Service Unit Test Suite", () => {
 				"DOWNVOTE",
 			);
 			expect(result).toEqual({ action: "CHANGED", vote: freshlyUpdatedRecord });
+			expect(mockRedis.delPattern).toHaveBeenCalledWith(
+				"post:post_123:vote_metrics:*",
+			);
 		});
 
 		it("Happy Path (Fresh Registration / Generation): should instantiate a new vote if no interaction footprints are found", async () => {
@@ -127,6 +154,9 @@ describe("Vote Service Unit Test Suite", () => {
 				type: "UPVOTE",
 			});
 			expect(result).toEqual({ action: "CREATED", vote: brandNewVoteRecord });
+			expect(mockRedis.delPattern).toHaveBeenCalledWith(
+				"post:post_123:vote_metrics:*",
+			);
 		});
 	});
 });

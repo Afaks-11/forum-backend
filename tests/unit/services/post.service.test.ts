@@ -228,7 +228,7 @@ describe("Post Service Unit Test Suite", () => {
 			);
 
 			await expect(softDeletePost("post_123", "usr_intruder")).rejects.toThrow(
-				new AppError("Unauthorized to delete this post", 401),
+				new AppError("Unauthorized to delete this post", 403),
 			);
 		});
 	});
@@ -342,13 +342,16 @@ describe("Post Service Unit Test Suite", () => {
 						true,
 						false,
 					),
-				).rejects.toThrow(new AppError("Unauthorized action", 401));
+				).rejects.toThrow(
+					new AppError("Forbidden: insufficient privileges", 403),
+				);
 			});
 		});
 
 		describe("Action: PIN", () => {
 			it("Happy Path: should execute internal visibility alterations and drop matching search cache contexts", async () => {
 				mockPostRepository.findUniqueById.mockResolvedValue(createFakePost());
+				mockPrisma.user.findUnique.mockResolvedValue({ role: "ADMIN" });
 
 				await modifyPostModerationState(
 					"post_123",
@@ -364,6 +367,26 @@ describe("Post Service Unit Test Suite", () => {
 				);
 				expect(mockRedis.del).toHaveBeenCalledWith("post:post_123");
 				expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:advanced:*");
+			});
+
+			it("Business Rule (Unauthorized): should refuse pinning for callers without moderation privileges, even post owners", async () => {
+				mockPostRepository.findUniqueById.mockResolvedValue(
+					createFakePost({ authorId: "usr_owner" }),
+				);
+				mockPrisma.user.findUnique.mockResolvedValue({ role: "USER" });
+
+				await expect(
+					modifyPostModerationState(
+						"post_123",
+						"usr_owner",
+						"PIN",
+						false,
+						true,
+					),
+				).rejects.toThrow(
+					new AppError("Forbidden: Moderator privileges required", 403),
+				);
+				expect(mockPostRepository.updatePinStatus).not.toHaveBeenCalled();
 			});
 		});
 

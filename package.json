@@ -28,10 +28,12 @@
 		"test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=./jest.config.cjs --coverage",
 		"test:changed": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=./jest.config.cjs --onlyChanged",
 		"test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=./jest.config.cjs --ci --maxWorkers=2 --coverage",
-		"test:integration:single": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand --forceExit",
-		"test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand --forceExit",
-		"test:integration:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand --watch --forceExit",
-		"db:test:push": "dotenv -e .env.test -- npx prisma db push"
+		"test:integration:single": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand",
+		"test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand",
+		"test:integration:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.integration.config.cjs --runInBand --watch",
+		"test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config=jest.e2e.config.cjs --runInBand",
+		"db:test:push": "dotenv -e .env.test -- npx prisma db push",
+		"test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.0",

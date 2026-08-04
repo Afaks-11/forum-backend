@@ -1,20 +1,9 @@
 import crypto from "node:crypto";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "@jest/globals";
+import { beforeAll, describe, expect, it } from "@jest/globals";
 import supertest from "supertest";
 import { getTestApp } from "../helpers/app.js";
 import { generateAccessToken } from "../helpers/auth.js";
-import {
-	closeTestDatabase,
-	getTestDatabase,
-	truncateTables,
-} from "../helpers/database.js";
+import { getTestDatabase } from "../helpers/database.js";
 
 let request: supertest.Agent;
 let db: ReturnType<typeof getTestDatabase>;
@@ -23,14 +12,6 @@ beforeAll(async () => {
 	const app = await getTestApp();
 	request = supertest(app);
 	db = getTestDatabase();
-});
-
-beforeEach(async () => {
-	await truncateTables(db);
-});
-
-afterAll(async () => {
-	await closeTestDatabase().catch(() => {});
 });
 
 const createUser = (overrides = {}) =>
@@ -104,7 +85,9 @@ describe("PATCH /api/v1/auth/me", () => {
 			.set("Authorization", `Bearer ${token}`)
 			.send({ username: "newname" });
 
-		expect(res.status).toBe(201);
+		// PATCH mutates an existing resource, so 200 is correct; 201 would assert
+		// that a new resource had been created.
+		expect(res.status).toBe(200);
 		expect(res.body.success).toBe(true);
 		expect(res.body.data.updatedUserProfileDetails.username).toBe("newname");
 	});
@@ -143,7 +126,7 @@ describe("PATCH /api/v1/auth/me", () => {
 });
 
 describe("DELETE /api/v1/auth/me", () => {
-	it("should delete account when authenticated", async () => {
+	it("should soft-delete the account when authenticated", async () => {
 		const user = await createUser();
 		const token = await generateAccessToken(user.id);
 
@@ -152,8 +135,13 @@ describe("DELETE /api/v1/auth/me", () => {
 			.set("Authorization", `Bearer ${token}`);
 
 		expect(res.status).toBe(204);
+
+		// Account deletion is a soft delete: the row is retained so that authored
+		// posts and comments keep a valid foreign key, and `deletedAt` is what
+		// gates login and profile access.
 		const deleted = await db.user.findUnique({ where: { id: user.id } });
-		expect(deleted).toBeNull();
+		expect(deleted).not.toBeNull();
+		expect(deleted?.deletedAt).not.toBeNull();
 	});
 
 	it("should return 401 without auth", async () => {

@@ -1,20 +1,9 @@
 import crypto from "node:crypto";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "@jest/globals";
+import { beforeAll, describe, expect, it } from "@jest/globals";
 import supertest from "supertest";
 import { getTestApp } from "../helpers/app.js";
 import { generateAccessToken } from "../helpers/auth.js";
-import {
-	closeTestDatabase,
-	getTestDatabase,
-	truncateTables,
-} from "../helpers/database.js";
+import { getTestDatabase } from "../helpers/database.js";
 
 let request: supertest.Agent;
 let db: ReturnType<typeof getTestDatabase>;
@@ -23,14 +12,6 @@ beforeAll(async () => {
 	const app = await getTestApp();
 	request = supertest(app);
 	db = getTestDatabase();
-});
-
-beforeEach(async () => {
-	await truncateTables(db);
-});
-
-afterAll(async () => {
-	await closeTestDatabase().catch(() => {});
 });
 
 const createUser = () =>

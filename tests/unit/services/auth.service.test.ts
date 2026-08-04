@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { AppError } from "../../../src/errors/AppError.js";
@@ -13,7 +13,7 @@ const mockUserRepository = {
 	findProfileById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateLoginLockState: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateProfile: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	delete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	softDelete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updatePassword: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateResetCredentials: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findByResetToken: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -61,6 +61,14 @@ const {
 const { createFakeUser } = await import("../../fixtures/user.fixture.js");
 
 describe("Auth Service Unit Test Suite", () => {
+	// `resetMocks` in jest.config.cjs strips every mock implementation before each
+	// test, so `emailQueue.add` would return `undefined` rather than a promise.
+	// The service chains `.catch()` onto that call for fire-and-forget notices,
+	// which throws on `undefined`. Re-arm the queue stub for every test.
+	beforeEach(() => {
+		mockEmailQueue.add.mockResolvedValue(undefined);
+	});
+
 	// REGISTER USER TESTS
 	describe("registerUser", () => {
 		it("Happy Path: should successfully hash password and register a unique new user account", async () => {
@@ -283,9 +291,10 @@ describe("Auth Service Unit Test Suite", () => {
 		});
 
 		it("deleteUserAccount: should cleanly hand-off user deletion directives to database layer", async () => {
-			mockUserRepository.delete.mockResolvedValue({ success: true });
+			mockUserRepository.softDelete.mockResolvedValue({ success: true });
 			const res = await deleteUserAccount("usr_delete");
 			expect(res).toBeDefined();
+			expect(mockUserRepository.softDelete).toHaveBeenCalledWith("usr_delete");
 		});
 	});
 
@@ -369,6 +378,27 @@ describe("Auth Service Unit Test Suite", () => {
 			expect(mockUserRepository.verifyEmailStatus).toHaveBeenCalledWith(
 				user.id,
 			);
+		});
+
+		it("verifyUserEmail: should reject a token whose expiry window has already elapsed", async () => {
+			const user = createFakeUser({
+				verificationTokenExpires: new Date(Date.now() - 1000),
+			});
+			mockUserRepository.findByVerifyToken.mockResolvedValue(user);
+
+			await expect(verifyUserEmail("stale_token")).rejects.toThrow(
+				new AppError("Verification token has expired", 401),
+			);
+			expect(mockUserRepository.verifyEmailStatus).not.toHaveBeenCalled();
+		});
+
+		it("verifyUserEmail: should reject an unknown token without touching the database", async () => {
+			mockUserRepository.findByVerifyToken.mockResolvedValue(null);
+
+			await expect(verifyUserEmail("nonexistent")).rejects.toThrow(
+				new AppError("Invalid or expired verification token", 401),
+			);
+			expect(mockUserRepository.verifyEmailStatus).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -11,7 +11,7 @@ module.exports = {
 	globalTeardown: "<rootDir>/tests/global-teardown.ts",
 
 	setupFiles: ["<rootDir>/tests/setup-env.ts"],
-	setupFilesAfterEnv: ["<rootDir>/tests/setup-integration.ts"],
+	setupFilesAfterEnv: ["<rootDir>/tests/e2e/setup.ts"],
 
 	moduleNameMapper: {
 		"^(\\.{1,2}/.*)\\.js$": "$1",
@@ -26,7 +26,7 @@ module.exports = {
 		"^.+\\.mjs$": "@swc/jest",
 	},
 
-	testMatch: ["<rootDir>/tests/integration/**/*.test.ts"],
+	testMatch: ["<rootDir>/tests/e2e/**/*.test.ts"],
 
 	// Shared containers and a truncating reset make parallel workers unsafe.
 	maxWorkers: 1,
@@ -35,7 +35,7 @@ module.exports = {
 	resetMocks: false,
 	restoreMocks: false,
 
-	coverageDirectory: "coverage/integration",
+	coverageDirectory: "coverage/e2e",
 	coverageProvider: "v8",
 	verbose: true,
 	testTimeout: 60000,

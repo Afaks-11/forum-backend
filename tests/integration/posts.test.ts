@@ -1,20 +1,9 @@
 import crypto from "node:crypto";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "@jest/globals";
+import { beforeAll, describe, expect, it } from "@jest/globals";
 import supertest from "supertest";
 import { getTestApp } from "../helpers/app.js";
 import { generateAccessToken } from "../helpers/auth.js";
-import {
-	closeTestDatabase,
-	getTestDatabase,
-	truncateTables,
-} from "../helpers/database.js";
+import { getTestDatabase } from "../helpers/database.js";
 
 let request: supertest.Agent;
 let db: ReturnType<typeof getTestDatabase>;
@@ -23,14 +12,6 @@ beforeAll(async () => {
 	const app = await getTestApp();
 	request = supertest(app);
 	db = getTestDatabase();
-});
-
-beforeEach(async () => {
-	await truncateTables(db);
-});
-
-afterAll(async () => {
-	await closeTestDatabase().catch(() => {});
 });
 
 const createUser = () =>
@@ -323,7 +304,7 @@ describe("DELETE /api/v1/posts/:id", () => {
 		expect(res.status).toBe(401);
 	});
 
-	it("should return 401 when non-author tries to delete", async () => {
+	it("should return 403 when non-author tries to delete", async () => {
 		const author = await createUser();
 		const hacker = await createUser();
 		const community = await createCommunity(author.id);
@@ -334,7 +315,9 @@ describe("DELETE /api/v1/posts/:id", () => {
 			.delete(`/api/v1/posts/${post.id}`)
 			.set("Authorization", `Bearer ${token}`);
 
-		expect(res.status).toBe(401);
+		// The caller is authenticated but not the owner, so this is an
+		// authorization failure (403), not an authentication one (401).
+		expect(res.status).toBe(403);
 	});
 
 	it("should return 404 for missing post", async () => {
@@ -440,7 +423,7 @@ describe("POST /api/v1/posts/:id/lock", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("should return 401 when non-author non-mod tries to lock", async () => {
+	it("should return 403 when non-author non-mod tries to lock", async () => {
 		const author = await createUser();
 		const hacker = await createUser();
 		const community = await createCommunity(author.id);
@@ -452,7 +435,8 @@ describe("POST /api/v1/posts/:id/lock", () => {
 			.set("Authorization", `Bearer ${token}`)
 			.send({ isLocked: true });
 
-		expect(res.status).toBe(401);
+		// Authenticated but lacking both ownership and moderator role.
+		expect(res.status).toBe(403);
 	});
 });
 

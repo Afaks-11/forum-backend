@@ -327,7 +327,7 @@ describe("Comment Service Unit Test Suite", () => {
 			expect(mockCommentRepository.softDelete).toHaveBeenCalledWith("cmnt_789");
 		});
 
-		it("Business Rule (Unauthorized): should guard lifecycle deletion fields with a 401 identity conflict response", async () => {
+		it("Business Rule (Unauthorized): should guard lifecycle deletion fields with a 403 ownership response", async () => {
 			mockCommentRepository.findById.mockReset();
 			mockCommentRepository.findById.mockResolvedValue(
 				createFakeComment({ authorId: "usr_owner" }),
@@ -336,7 +336,7 @@ describe("Comment Service Unit Test Suite", () => {
 			await expect(
 				softDeleteComment("cmnt_789", "usr_intruder"),
 			).rejects.toThrow(
-				new AppError("Unauthorized to delete this comment", 401),
+				new AppError("Forbidden: You do not own this comment", 403),
 			);
 		});
 	});
