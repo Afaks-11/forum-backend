@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
+import { env } from "../config/env.config.js";
 import { socketAuthMiddleware } from "../middlewares/socket.middleware.js";
 import { logger } from "../utils/logger.js";
 import { joinNotificationRoom } from "./rooms/notification.room.js";
@@ -14,8 +15,9 @@ let io: Server | null = null;
 export const initSocketServer = (httpServer: HttpServer): Server => {
 	io = new Server(httpServer, {
 		cors: {
-			origin: "*",
+			origin: env.app.corsOrigins,
 			methods: ["GET", "POST"],
+			credentials: true,
 		},
 	});
 

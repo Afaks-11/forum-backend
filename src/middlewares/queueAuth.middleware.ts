@@ -1,6 +1,20 @@
+import { timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.config.js";
 import { logger } from "../utils/logger.js";
+
+/**
+ * Constant-time string comparison to avoid leaking credential length/content
+ * through timing side channels.
+ */
+const safeCompare = (a: string, b: string): boolean => {
+	const bufA = Buffer.from(a);
+	const bufB = Buffer.from(b);
+	if (bufA.length !== bufB.length) {
+		return false;
+	}
+	return timingSafeEqual(bufA, bufB);
+};
 
 /**
  * Lightweight, dependency-free HTTP Basic Authentication middleware
@@ -29,11 +43,15 @@ export const queueAuthMiddleware = (
 			.toString("utf-8")
 			.split(":");
 
-		// Fallback to safe defaults if environment variables aren't defined yet
-		const expectedUser = env.bullBoard.username || "admin";
-		const expectedPass = env.bullBoard.password || "admin_secret_pass";
+		const expectedUser = env.bullBoard.username;
+		const expectedPass = env.bullBoard.password;
 
-		if (username === expectedUser && password === expectedPass) {
+		if (
+			username &&
+			password &&
+			safeCompare(username, expectedUser) &&
+			safeCompare(password, expectedPass)
+		) {
 			return next();
 		}
 	} catch (err) {

@@ -1,7 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { env } from "../config/env.config.js";
-import { AppError } from "../errors/AppError.js";
 
 export const optionalAuth = (
 	req: Request,
@@ -26,8 +25,9 @@ export const optionalAuth = (
 		res.locals.user = {
 			userId: decoded.userId,
 		};
-		return next();
 	} catch (_error) {
-		return next(new AppError("Session expired or invalid token format", 401));
+		// Optional auth: an invalid or expired token simply means the request
+		// proceeds anonymously rather than failing the whole request.
 	}
+	return next();
 };

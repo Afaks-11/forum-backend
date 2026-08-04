@@ -16,7 +16,8 @@ export const socketAuthMiddleware = (
 		socket.handshake.query?.token;
 
 	if (!token || typeof token !== "string") {
-		throw new AppError("Authentication error: Token verification failed.", 401);
+		next(new AppError("Authentication error: Token verification failed.", 401));
+		return;
 	}
 
 	try {
@@ -28,15 +29,15 @@ export const socketAuthMiddleware = (
 		};
 
 		if (!decoded.userId) {
-			throw new AppError(
-				"Authentication error: Token verification failed.",
-				401,
+			next(
+				new AppError("Authentication error: Token verification failed.", 401),
 			);
+			return;
 		}
 
 		socket.data.userId = decoded.userId;
 		next();
 	} catch (_err) {
-		throw new AppError("Authentication error: Token verification failed.", 401);
+		next(new AppError("Authentication error: Token verification failed.", 401));
 	}
 };

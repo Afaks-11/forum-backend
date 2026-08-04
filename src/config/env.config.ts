@@ -18,6 +18,14 @@ export const env = {
 	app: {
 		nodeEnv: process.env.NODE_ENV ?? "development",
 		port: parseInt(process.env.PORT ?? "3000", 10),
+		// Comma-separated list of allowed origins for CORS (Express + Socket.IO).
+		// Defaults to localhost dev origins when unset so local dev keeps working.
+		corsOrigins: (
+			process.env.CORS_ORIGINS ?? "http://localhost:3000,http://localhost:5173"
+		)
+			.split(",")
+			.map((origin) => origin.trim())
+			.filter(Boolean),
 	},
 
 	redis: {
