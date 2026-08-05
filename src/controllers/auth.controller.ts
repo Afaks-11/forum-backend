@@ -40,6 +40,8 @@ export const login = asyncHandler(async (req, res) => {
 	const validatedData = loginSchema.parse(req.body);
 	const result = await loginUser(validatedData);
 
+	// The refresh token is confined to an httpOnly cookie so client-side scripts
+	// cannot read it; only the short-lived access token is handed to the caller.
 	res.cookie("refreshToken", result.refreshToken, {
 		httpOnly: true,
 		secure: process.env.NODE_ENV === "production",
@@ -67,12 +69,9 @@ export const refresh = asyncHandler(async (req, res) => {
 			.status(200)
 			.json({ success: true, data: { accessToken: newAccessToken } });
 	} catch (error) {
-		if (
-			error instanceof AppError &&
-			(error.statusCode === 401 || error.statusCode === 403)
-		) {
-			res.clearCookie("refreshToken");
-		}
+		// A rejected token will never become valid again, so drop the cookie to
+		// stop the client retrying with it on every subsequent request.
+		res.clearCookie("refreshToken");
 		throw error;
 	}
 });

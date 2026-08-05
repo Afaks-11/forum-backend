@@ -16,6 +16,8 @@ import {
 
 export const getProfile = asyncHandler(async (req, res) => {
 	const { username } = usernameParamSchema.parse(req.params);
+	// This route is mounted behind optional auth, so the viewer may be anonymous;
+	// the id is passed through only to resolve viewer-relative fields such as
 	const currentUserId = res.locals.user?.userId;
 
 	const data = await getUserProfileByUsername(username, currentUserId);

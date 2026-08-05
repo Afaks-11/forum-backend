@@ -53,6 +53,10 @@ export const removeComment = asyncHandler(
 	},
 );
 
+/**
+ * Builds a handler for one moderation action so the four routes share a single
+ * implementation instead of duplicating parse-and-dispatch logic.
+ */
 export const handleCommentAction = (
 	actionType: "LOCK" | "REMOVE" | "SAVE" | "REPORT",
 ) => {

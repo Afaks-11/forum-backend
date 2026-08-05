@@ -2,6 +2,11 @@ import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { env } from "../config/env.config.js";
 
+/**
+ * Rejects requests without a valid bearer access token.
+ * On success the caller's id is published on `res.locals.user` for downstream
+ * handlers.
+ */
 export const requireAuth = (
 	req: Request,
 	res: Response,

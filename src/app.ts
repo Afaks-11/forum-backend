@@ -38,7 +38,6 @@ const allowedOrigins = env.app.corsOrigins;
 app.use(
 	cors({
 		origin: (origin, callback) => {
-			// Allow non-browser clients (curl, server-to-server, same-origin) with no Origin header.
 			if (!origin || allowedOrigins.includes(origin)) {
 				return callback(null, true);
 			}
@@ -50,6 +49,9 @@ app.use(
 
 app.use(
 	helmet({
+		// CSP is disabled because Swagger UI and bull-board inject inline scripts
+		// that would otherwise be blocked, and defining a strict policy for every
+		// third-party dashboard would couple the backend to their internal bundling.
 		contentSecurityPolicy: false,
 	}),
 );

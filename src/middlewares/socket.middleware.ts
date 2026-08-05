@@ -5,6 +5,8 @@ import type { AuthenticatedSocket } from "../socket/socket.types.js";
 
 /**
  * Validates the JWT during socket handshakes and binds the user ID to the socket.
+ * Three token locations are accepted because browser WebSocket clients cannot
+ * set request headers; native and proxied clients can.
  */
 export const socketAuthMiddleware = (
 	socket: AuthenticatedSocket,
@@ -23,7 +25,8 @@ export const socketAuthMiddleware = (
 	try {
 		const secret = env.jwt.accessSecret;
 
-		// Decoded signature payload verification
+		// Every failure path returns the same opaque message so a caller cannot
+		// distinguish an expired token from a forged or malformed one.
 		const decoded = jwt.verify(token, secret) as {
 			userId: string;
 		};

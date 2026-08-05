@@ -3,6 +3,12 @@ import { z } from "zod";
 import { AppError } from "../errors/AppError.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Catches all exceptions and serializes them into a consistent JSON response.
+ * ZodError validation failures become 400, AppError uses its own status, and
+ * everything else becomes a logged 500.
+ * The trace ID lets support match a user's report to the logged exception.
+ */
 export function globalErrorHandler(
 	err: unknown,
 	_req: Request,
@@ -30,7 +36,8 @@ export function globalErrorHandler(
 		});
 	}
 
-	// Unexpected errors
+	// Unexpected errors are logged in full but answered generically: internal
+	// messages and stack traces must not reach the client.
 	logger.error(
 		{ err, traceId },
 		"Unhandled exception caught by global error handler",
@@ -38,6 +45,6 @@ export function globalErrorHandler(
 	return res.status(500).json({
 		success: false,
 		message: "Internal Server Error",
-		traceId, // Allows customer support to match user tickets with system exceptions instantl
+		traceId,
 	});
 }

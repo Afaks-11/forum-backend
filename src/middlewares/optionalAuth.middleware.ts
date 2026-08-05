@@ -2,6 +2,11 @@ import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { env } from "../config/env.config.js";
 
+/**
+ * Attaches the caller's identity when a valid token is present, but never
+ * rejects. Used by endpoints whose response is richer for signed-in users yet
+ * must stay reachable anonymously.
+ */
 export const optionalAuth = (
 	req: Request,
 	res: Response,

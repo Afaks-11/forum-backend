@@ -42,14 +42,13 @@ async function bootstrap() {
 }
 
 function registerShutdown() {
+	// Orchestrators often send SIGTERM followed by SIGINT; the guard keeps a
+	// second signal from tearing down connections mid-drain.
 	let shuttingDown = false;
 
 	/**
 	 * Close resources in dependency order: stop accepting traffic, then drain
-	 * background work, then release the datastores. Previously only the HTTP
-	 * server was closed, so Redis, BullMQ and Prisma handles kept the event loop
-	 * alive and ioredis retried against a terminated endpoint, emitting
-	 * ECONNREFUSED on every attempt until the process was force-killed.
+	 * background work, then release the datastores.
 	 */
 	const shutdown = async (signal: string) => {
 		if (shuttingDown) return;

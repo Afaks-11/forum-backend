@@ -17,8 +17,9 @@ const safeCompare = (a: string, b: string): boolean => {
 };
 
 /**
- * Lightweight, dependency-free HTTP Basic Authentication middleware
- * to protect the background job control room.
+ * HTTP Basic Authentication for the queue dashboard.
+ * Credentials are validated using constant-time comparison to prevent timing
+ * attacks from leaking password length or content.
  */
 export const queueAuthMiddleware = (
 	req: Request,
@@ -33,7 +34,8 @@ export const queueAuthMiddleware = (
 	}
 
 	try {
-		// Decode the Base64 header "Basic <token>"
+		// Basic auth is used because the bull-board dashboard is a mounted
+		// third-party UI that cannot participate in the app's JWT flow.
 		const [scheme, credentials] = authHeader.split(" ");
 		if (scheme !== "Basic" || !credentials) {
 			return res.status(401).send("Invalid authorization header scheme.");

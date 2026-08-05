@@ -5,8 +5,8 @@ import { prisma } from "../utils/prisma.js";
 type AllowedRole = "USER" | "MODERATOR" | "ADMIN";
 
 /**
- * Reusable role-based authorization gatekeeper.
- * Assumes requireAuth has already executed and populated res.locals.user.
+ * Rejects requests whose caller lacks one of the allowed roles.
+ * Assumes `requireAuth` already ran and populated `res.locals.user.userId`.
  */
 export const requireRole = (allowedRoles: AllowedRole[]) => {
 	return async (
@@ -25,7 +25,8 @@ export const requireRole = (allowedRoles: AllowedRole[]) => {
 				return;
 			}
 
-			// Fetch the user's live system role from the database
+			// The role is read live rather than taken from the JWT so that a
+			// demotion takes effect immediately instead of when the token expires.
 			const user = await prisma.user.findUnique({
 				where: { id: userId },
 				select: { role: true },
@@ -55,7 +56,6 @@ export const requireRole = (allowedRoles: AllowedRole[]) => {
 				return;
 			}
 
-			// Cache the role field in locals to prevent redundant downstream database lookups
 			res.locals.user.role = user.role;
 
 			next();

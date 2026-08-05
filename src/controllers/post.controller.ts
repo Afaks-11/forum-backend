@@ -97,6 +97,10 @@ export const unsavePost = asyncHandler(async (req: Request, res: Response) => {
 	res.status(200).json({ success: true, message: "Post unsaved successfully" });
 });
 
+/**
+ * Builds a handler for one moderation action, letting the four routes share a
+ * single implementation instead of duplicating parse-and-dispatch logic.
+ */
 export const toggleModerationFlag = (
 	actionType: "PIN" | "LOCK" | "HIDE" | "REPORT",
 ) => {

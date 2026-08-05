@@ -2,6 +2,11 @@ import { rateLimit } from "express-rate-limit";
 import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "../utils/redis.js";
 
+/**
+ * Baseline per-IP limiter applied across the API.
+ * Counters live in Redis rather than process memory so the limit holds across
+ * restarts and multiple instances.
+ */
 export const limiter = rateLimit({
 	windowMs: 10 * 60 * 1000,
 	limit: 100,

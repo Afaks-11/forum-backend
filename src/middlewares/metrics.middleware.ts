@@ -4,12 +4,14 @@ import {
 	httpRequestDurationHistogram,
 } from "../utils/metrics.js";
 
+/**
+ * Records request count and duration into the Prometheus registry.
+ */
 export const metricsMiddleware = (
 	req: Request,
 	res: Response,
 	next: NextFunction,
 ) => {
-	// Exclude the metrics endpoint itself to prevent data skew from telemetry scrapes
 	if (req.originalUrl === "/metrics" || req.url === "/metrics") {
 		return next();
 	}
@@ -20,7 +22,9 @@ export const metricsMiddleware = (
 		const diff = process.hrtime(startTime);
 		const durationInSeconds = diff[0] + diff[1] / 1e9;
 
-		// Use the parameterized route string (e.g., /api/v1/posts/:id) if matched to prevent label cardinality explosions
+		// Label with the parameterized route (/api/v1/posts/:id) when Express
+		// matched one; raw URLs would create a new time series per post ID and
+		// blow up label cardinality.
 		const routePath = req.route ? req.route.path : req.originalUrl || req.url;
 		const method = req.method;
 		const statusCode = res.statusCode.toString();

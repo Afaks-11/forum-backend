@@ -1,3 +1,5 @@
+// Required values throw at import time so a misconfigured deployment fails on
+// boot rather than at the first request that happens to need the secret.
 const getEnvOrThrow = (key: string): string => {
 	const value = process.env[key];
 	if (!value) {
@@ -18,8 +20,6 @@ export const env = {
 	app: {
 		nodeEnv: process.env.NODE_ENV ?? "development",
 		port: parseInt(process.env.PORT ?? "3000", 10),
-		// Comma-separated list of allowed origins for CORS (Express + Socket.IO).
-		// Defaults to localhost dev origins when unset so local dev keeps working.
 		corsOrigins: (
 			process.env.CORS_ORIGINS ?? "http://localhost:3000,http://localhost:5173"
 		)
