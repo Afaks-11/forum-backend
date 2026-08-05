@@ -3,27 +3,28 @@ import { cronQueue } from "../queues/cron.queue.js";
 import { emailQueue } from "../queues/email.queue.js";
 import { notificationQueue } from "../queues/notification.queue.js";
 
-// Instantiate the global metrics runtime collection (Captures CPU, Memory, Event Loop Lag)
+// Default collectors (CPU, memory, event-loop lag) are namespaced so forum
+// series never collide with metrics from sidecars sharing the same Prometheus.
 client.collectDefaultMetrics({
 	prefix: "forum_",
 });
 
-// Define custom counter for HTTP transaction volume tracking
 export const httpRequestCounter = new client.Counter({
 	name: "forum_http_requests_total",
 	help: "Total number of HTTP requests processed by the backend engine",
 	labelNames: ["method", "route", "status_code"],
 });
 
-// Define custom histogram to observe response latencies
 export const httpRequestDurationHistogram = new Histogram({
 	name: "forum_http_request_duration_seconds",
 	help: "Duration of HTTP requests in fractional seconds",
 	labelNames: ["method", "route", "status_code"],
-	buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10], // Granular bucket slots for fast APIs
+	// Buckets are weighted toward the low millisecond range because most
+	// endpoints are cache- or index-backed; the default buckets would put
+	// almost every request in the first slot and hide real regressions.
+	buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
 });
 
-// Define custom gauge to track real-time queue backlogs across the BullMQ layout
 export const bullmqQueueJobsGauge = new client.Gauge({
 	name: "forum_bullmq_queue_jobs_total",
 	help: "Total count of jobs inside BullMQ infrastructure categorized by queue and execution state",
@@ -31,7 +32,9 @@ export const bullmqQueueJobsGauge = new client.Gauge({
 });
 
 /**
- * Iterates through active BullMQ queues to collect current job states dynamically during scraping.
+ * Refreshes the BullMQ backlog gauge from Redis.
+ * Called on each scrape rather than on job events so the numbers stay accurate
+ * even for jobs enqueued by other processes.
  */
 export const syncBullMQMetrics = async (): Promise<void> => {
 	const queueMap = [
@@ -71,7 +74,8 @@ export const syncBullMQMetrics = async (): Promise<void> => {
 				counts.delayed ?? 0,
 			);
 		} catch {
-			// Suppress errors to ensure a transient Redis timeout doesn't break the entire scraping pipeline
+			// Per-queue failures are contained so one unreachable queue leaves the
+			// remaining metrics scrapable instead of failing the whole endpoint.
 		}
 	}
 };

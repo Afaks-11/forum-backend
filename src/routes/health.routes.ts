@@ -38,6 +38,9 @@ router.get("/live", (_req, res) => {
  *     description: Deep readiness verification checking all supporting backend infra dependencies.
  */
 router.get("/ready", async (_req, res) => {
+	// Every dependency is probed even after one has already failed, so a single
+	// response tells an operator everything that is down rather than only the
+	// first thing checked.
 	const healthStatus = {
 		status: "UP",
 		timestamp: new Date().toISOString(),
@@ -105,6 +108,9 @@ router.get("/ready", async (_req, res) => {
 		healthStatus.status = "DOWN";
 	}
 
+	// 503 rather than 500: a degraded dependency is a transient condition, and
+	// orchestrators treat it as "pull from the load balancer" instead of
+	// "restart the container", which liveness already covers separately.
 	const complianceStatusCode = healthStatus.status === "UP" ? 200 : 503;
 	res.status(complianceStatusCode).json(healthStatus);
 });

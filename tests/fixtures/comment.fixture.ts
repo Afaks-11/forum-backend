@@ -1,3 +1,6 @@
+/**
+ * Generates a comment fixture with author and post relations for unit tests.
+ */
 export function createFakeComment(overrides = {}) {
 	return {
 		id: "cmnt_789",
@@ -15,6 +18,9 @@ export function createFakeComment(overrides = {}) {
 	};
 }
 
+/**
+ * Minimal post metadata for comment service tests that need the parent post.
+ */
 export function createFakePostPayload(overrides = {}) {
 	return {
 		id: "post_123",

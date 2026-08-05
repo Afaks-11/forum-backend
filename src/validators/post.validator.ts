@@ -1,6 +1,8 @@
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
+// Adds `.openapi()` to the shared Zod instance. Repeated per module because
+// import order is not guaranteed; the call is idempotent.
 extendZodWithOpenApi(z);
 
 export const createPostSchema = z.object({
@@ -70,6 +72,8 @@ export const postFeedQuerySchema = z.object({
 			"OPTIONAL: Database primary key UUID token for high-performance keyset pagination offsets.",
 		example: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
 	}),
+	// Left as a string because this schema validates the raw query string; the
+	// service layer owns the numeric coercion and clamping for feed pagination.
 	limit: z.string().optional().default("10").openapi({
 		description:
 			"OPTIONAL: Max records capacity count inside a single network response page.",
@@ -123,6 +127,9 @@ export const communityIdParamSchema = z.object({
 	communityId: z.uuid("Invalid community identifier format"),
 });
 
+// Validates the already-coerced service-layer arguments rather than raw query
+// params, which is why `limit` is a number here and a string in
+// `postFeedQuerySchema`.
 export const getAdvancedPostsFeedSchema = z.object({
 	sort: z.enum(["new", "top", "hot", "controversial"]).optional(),
 	community: z.string().optional(),

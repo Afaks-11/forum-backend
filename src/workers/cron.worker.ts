@@ -4,6 +4,11 @@ import type { CronJobData } from "../queues/cron.queue.js";
 import { logger } from "../utils/logger.js";
 import { prisma } from "../utils/prisma.js";
 
+/**
+ * Executes scheduled maintenance actions dispatched by the cron queue.
+ * Both branches delete through Prisma directly rather than a repository: these
+ * are retention sweeps with no domain rules, not application reads or writes.
+ */
 export const cronWorker = new Worker<CronJobData>(
 	"cron-queue",
 	async (job: Job<CronJobData>) => {
@@ -36,6 +41,8 @@ export const cronWorker = new Worker<CronJobData>(
 				const thirtyDaysAgo = new Date();
 				thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+				// Soft-deleted rows are kept for 30 days so moderation decisions and
+				// accidental deletions remain recoverable before the data is gone.
 				const result = await prisma.post.deleteMany({
 					where: {
 						deletedAt: {

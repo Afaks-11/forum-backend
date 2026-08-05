@@ -23,6 +23,8 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 const router = express.Router();
 
 router.get("/", browseCommunities);
+// `/search` is declared before `/:slug` because Express matches in registration
+// order and the parameterised route would otherwise swallow it as a slug.
 router.get("/search", handleCommunitySearch);
 router.get("/:slug", getCommunity);
 router.get("/:slug/posts", getCommunityPosts);

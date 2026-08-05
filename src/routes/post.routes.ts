@@ -12,7 +12,7 @@ import {
 	unsavePost,
 } from "../controllers/post.controller.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
-import { optionalAuth } from "../middlewares/optionalAuth.middleware.js"; // Standard fallback utility if available
+import { optionalAuth } from "../middlewares/optionalAuth.middleware.js";
 import { requireModerator } from "../middlewares/role.middleware.js";
 
 const router = express.Router();

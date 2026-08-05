@@ -8,18 +8,27 @@ import {
 } from "../utils/ranking.math.js";
 import { redis } from "../utils/redis.js";
 
+/**
+ * Recomputes the global hot and controversial feed ZSETs on a schedule.
+ * Scores are precomputed here rather than at read time because hot ranking
+ * depends on vote totals that would otherwise require a sort over every post
+ * on every feed request.
+ */
 export const rankingWorker = new Worker(
 	"ranking-cron-queue",
 	async () => {
 		logger.info(" Compiling dynamic feed rankings...");
 
-		// Pull top 1,000 active recent items to recalculate rankings
+		// Bounded to the most recent 1,000 active posts: older content cannot
+		// realistically re-enter the hot feed, and an unbounded scan would grow
+		// the job's runtime with the table.
 		const recentPosts = await postRepository.findRecentActivePosts(1000);
 
 		const globalHotKey = "feed:global:hot";
 		const globalControversialKey = "feed:global:controversial";
 
-		// Extract the raw client to execute the atomic pipeline operation smoothly
+		// All ZADDs are batched into one pipeline so readers never observe a
+		// half-rebuilt index across many separate round trips.
 		const rawRedisClient = redis.getClient();
 		const pipeline = rawRedisClient.pipeline();
 
@@ -34,12 +43,12 @@ export const rankingWorker = new Worker(
 				downvotes,
 			);
 
-			// Populate memory Sets inside Redis
 			pipeline.zadd(globalHotKey, hotScore, post.id);
 			pipeline.zadd(globalControversialKey, controversialScore, post.id);
 		}
 
-		// Cap indexes at 1,000 items to drop old tail-end memory weights
+		// Trim to the top 1,000 by rank; without this the ZSETs would accumulate
+		// every post ever ranked and grow without bound.
 		pipeline.zremrangebyrank(globalHotKey, 0, -1001);
 		pipeline.zremrangebyrank(globalControversialKey, 0, -1001);
 

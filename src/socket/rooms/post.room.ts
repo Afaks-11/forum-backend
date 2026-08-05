@@ -1,10 +1,14 @@
 import { logger } from "../../utils/logger.js";
 import type { AuthenticatedSocket } from "../socket.types.js";
 
+/**
+ * Lets a client opt into and out of live updates for a specific post.
+ * Membership is client-driven because a user may have any number of post pages
+ * open, and broadcasting every post to every socket would not scale.
+ */
 export const registerPostRoomListeners = (
 	socket: AuthenticatedSocket,
 ): void => {
-	// Client transitions onto a post page
 	socket.on("post:join", (postId: string) => {
 		if (!postId || typeof postId !== "string") return;
 

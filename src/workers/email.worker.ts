@@ -4,6 +4,9 @@ import type { EmailJobData } from "../queues/email.queue.js";
 import { logger } from "../utils/logger.js";
 import { sendSystemEmail } from "../utils/mailer.js";
 
+/**
+ * Drains the email queue by handing each job to the SMTP transport.
+ */
 export const emailWorker = new Worker<EmailJobData>(
 	"email-queue",
 	async (job: Job<EmailJobData>) => {
@@ -17,7 +20,9 @@ export const emailWorker = new Worker<EmailJobData>(
 	},
 	{
 		connection: createQueueConnection(),
-		concurrency: 5, // Process up to 5 emails in parallel
+		// Kept low deliberately: SMTP providers throttle aggressively and a
+		// higher fan-out mostly converts into retried jobs.
+		concurrency: 5,
 	},
 );
 

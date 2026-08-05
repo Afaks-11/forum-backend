@@ -7,6 +7,11 @@ import { notificationQueue } from "./notification.queue.js";
 
 let serverAdapter: ExpressAdapter | null = null;
 
+/**
+ * Builds (once) the bull-board Express adapter mounted at /admin/queues.
+ * Construction is deferred and memoized because createBullBoard registers
+ * global handlers; calling it twice would double-mount the UI routes.
+ */
 export const getQueueDashboardAdapter = (): ExpressAdapter => {
 	if (!serverAdapter) {
 		serverAdapter = new ExpressAdapter();

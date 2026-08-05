@@ -1,6 +1,9 @@
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
+// Mutates the shared Zod instance to add `.openapi()`. Every validator module
+// calls it because import order across the registry is not guaranteed, and the
+// extension is idempotent.
 extendZodWithOpenApi(z);
 
 export const registerSchema = z
@@ -27,6 +30,9 @@ export const updateMeSchema = z
 	})
 	.openapi("UpdateMeInput");
 
+// Login deliberately checks only that a password is present, not that it meets
+// the registration policy: rejecting a short password here would leak that the
+// stored one is longer, and would lock out accounts predating a policy change.
 export const loginSchema = z
 	.object({
 		email: z.email("Invalid email format"),

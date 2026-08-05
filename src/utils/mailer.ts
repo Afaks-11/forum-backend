@@ -4,6 +4,8 @@ import { logger } from "./logger.js";
 
 let transporter: Transporter | undefined;
 
+// The transporter is created lazily and memoized: verify() opens a real SMTP
+// handshake, so building one per email would add a round trip to every send.
 const initMailer = async (): Promise<Transporter> => {
 	if (transporter) {
 		return transporter;
@@ -23,6 +25,11 @@ const initMailer = async (): Promise<Transporter> => {
 	return transporter;
 };
 
+/**
+ * Sends a transactional email.
+ * Delivery failures are logged but never thrown: callers run inside queue
+ * workers where an unhandled rejection would fail the whole job.
+ */
 export const sendSystemEmail = async (
 	to: string,
 	subject: string,

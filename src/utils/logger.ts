@@ -3,6 +3,11 @@ import { env } from "../config/env.config.js";
 
 const isDevelopment = env.app.nodeEnv === "development";
 
+/**
+ * Shared Pino logger instance.
+ * Development runs through pino-pretty for human-readable colored output;
+ * production writes structured JSON to stdout for log aggregation.
+ */
 const loggerOptions: pino.LoggerOptions = {
 	level: isDevelopment ? "debug" : "info",
 	timestamp: pino.stdTimeFunctions.isoTime,

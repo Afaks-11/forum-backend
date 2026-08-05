@@ -15,7 +15,8 @@ export const feedQuerySchema = z.object({
 		.optional()
 		.transform((val) => (val ? parseInt(val, 10) : 10))
 		.pipe(z.number().int().min(1).max(50)),
-	cursor: z.string().optional(), // For Redis ZSET, this is an encoded string index or score
+	// For Redis ZSET pagination, this is an encoded score or offset token.
+	cursor: z.string().optional(),
 });
 
 export const feedPostItemSchema = z.object({

@@ -4,7 +4,7 @@ A production-oriented REST + WebSocket API for a Reddit-style discussion platfor
 
 Built with TypeScript in strict mode on Node.js 24 (native ESM), Express 5, Prisma 7 over PostgreSQL, Redis, and BullMQ. It is layered along Clean Architecture lines, covered by three distinct test suites, and validated end-to-end by CI against real containerized datastores rather than mocks.
 
----
+
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Built with TypeScript in strict mode on Node.js 24 (native ESM), Express 5, Pris
 15. [Troubleshooting](#15-troubleshooting)
 16. [Future Improvements](#16-future-improvements)
 
----
+
 
 ## 1. Project Overview
 
@@ -41,7 +41,7 @@ Three concerns drove the design:
 
 The project is deliberately built to production conventions. Graceful shutdown, health probes, non-root containers, secret hygiene, rate limiting, and a real CI pipeline conventions.
 
----
+
 
 ## 2. Features
 
@@ -59,13 +59,13 @@ The refresh secret is combined with the user's current password hash at signing 
 
 **Real-time.** Socket.IO with JWT handshake authentication. Clients join per-post rooms to receive live comment and vote activity, and each authenticated user is placed in a private room for notification delivery.
 
-**Background processing.** Four BullMQ queues — email, notification, cron, and ranking — each with a dedicated worker. Recurring ranking recomputation is registered as a repeatable job. A Bull Board dashboard is mounted at `/admin/queues` behind HTTP basic auth.
+**Background processing.** Four BullMQ queues email, notification, cron, and ranking each with a dedicated worker. Recurring ranking recomputation is registered as a repeatable job. A Bull Board dashboard is mounted at `/admin/queues` behind HTTP basic auth.
 
 **Media.** Cloudinary signed direct uploads. The server issues a short-lived signature for a constrained folder set (`avatars`, `banners`, `posts`); the file itself never transits this API, and the Cloudinary API secret is used only to sign and is never returned in a response.
 
 **Cross-cutting.** Helmet security headers, an explicit CORS allowlist shared by Express and Socket.IO, Redis-backed rate limiting (100 requests per 10 minutes globally, tightened to 10 per 15 minutes on authentication endpoints), Zod request validation, OpenAPI documentation generated from those same Zod schemas, Prometheus metrics, and structured logging.
 
----
+
 
 ## 3. Architecture
 
@@ -95,19 +95,19 @@ HTTP request
 
 **Routes** declare structure and nothing else. A route file maps a path to a middleware chain and a controller; it contains no logic.
 
-**Controllers** are thin by rule. Each is wrapped in `asyncHandler`, which forwards rejected promises to the global error handler — so no controller contains a `try/catch`. A controller extracts and validates input, calls exactly one service function, and serializes the result.
+**Controllers** are thin by rule. Each is wrapped in `asyncHandler`, which forwards rejected promises to the global error handler so no controller contains a `try/catch`. A controller extracts and validates input, calls exactly one service function, and serializes the result.
 
 **Services** hold the business rules and are exported as plain functions rather than classes, because they are stateless and function exports give better tree-shaking and simpler test seams than instantiating a class for behavior that has no state.
 
 **Repositories** are classes with a `PrismaClient` injected through the constructor. This is the one place classes earn their keep: the injected client is what allows a repository to participate in a caller's transaction, and it is what makes unit tests able to supply a typed test double without module mocking.
 
-**Error handling** is a three-part contract used everywhere. `AppError(message, statusCode)` expresses expected failures; `asyncHandler` catches them; `globalErrorHandler` translates them — a `ZodError` becomes `400` with field detail, an `AppError` becomes its own status, anything else becomes `500` with the internal detail logged but not exposed. Every error response carries its `traceId`.
+**Error handling** is a three-part contract used everywhere. `AppError(message, statusCode)` expresses expected failures; `asyncHandler` catches them; `globalErrorHandler` translates them, a `ZodError` becomes `400` with field detail, an `AppError` becomes its own status, anything else becomes `500` with the internal detail logged but not exposed. Every error response carries its `traceId`.
 
 **Validation** lives in `src/validators/` as Zod schemas, and those exact schemas are registered with `@asteasolutions/zod-to-openapi` to generate the API documentation. The docs cannot drift from the validation rules, because they are the same objects.
 
 **Type safety** is strict. `tsconfig.json` enables `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `noUncheckedSideEffectImports`. The `any` type does not appear in `src/`.
 
----
+
 
 ## 4. Technology Stack
 
@@ -131,7 +131,7 @@ HTTP request
 | Testing | Jest 30 + `@swc/jest`, Supertest 7, Testcontainers 12 | Three suites; real Postgres and Redis for two of them |
 | Tooling | Biome 2.5, Husky, lint-staged, tsx, `dotenv-cli` | Lint/format on commit, fast dev reload |
 
----
+
 
 ## 5. Folder Structure
 
@@ -172,7 +172,7 @@ forum-backend/
 └── jest.{config,integration.config,e2e.config}.cjs
 ```
 
----
+
 
 ## 6. Installation
 
@@ -200,7 +200,7 @@ npx prisma db push
 
 The schema is currently applied with `db push` rather than through a migration history — see [Deployment](#14-deployment) for why that needs to change before this ships.
 
----
+
 
 ## 7. Local Development
 
@@ -236,7 +236,7 @@ If you only need the datastores locally and want to run the API on the host:
 docker compose up -d forum-postgres forum-redis
 ```
 
----
+
 
 ## 8. Docker
 
@@ -263,7 +263,7 @@ docker compose up --build
 
 A `docker-compose.yml` also exists but is a deprecated shim that `include`s `compose.yaml`. Docker resolves `compose.yaml` first, so `compose.yaml` is the file to edit.
 
----
+
 
 ## 9. Environment Variables
 
@@ -295,7 +295,7 @@ openssl rand -base64 48
 
 `.env`, `.env.test`, and `.env.docker` are git-ignored. `.env.example` contains placeholders only.
 
----
+
 
 ## 10. Testing
 
@@ -336,7 +336,7 @@ Both the integration and E2E setups are three-line delegators over one shared mo
 
 Neither suite uses `--forceExit`. That flag hides leaked handles; without it, a connection the application forgets to close shows up immediately as Jest's "did not exit one second after test run completed" warning. Keeping that signal is deliberate.
 
----
+
 
 ## 11. CI/CD
 
@@ -355,7 +355,6 @@ quality-check ──┬── integration-tests ──┐
 
 The two test jobs are parallel because they share no state — each starts its own container cluster. `docker-verification` gates on both, so a green image build always implies green tests.
 
----
 
 ## 12. Available Scripts
 
@@ -378,7 +377,7 @@ The two test jobs are parallel because they share no state — each starts its o
 | `npm run test:ci` | Unit suite, CI reporter, 2 workers, coverage |
 | `npm run db:test:push` | Push the schema to the `.env.test` database |
 
----
+
 
 ## 13. API Documentation
 
@@ -405,7 +404,6 @@ Operational endpoints sit outside the versioned prefix: `/health`, `/health/live
 
 **Errors.** Every failure returns a consistent envelope carrying its `traceId`, which is the same ID present in the structured log line for that request.
 
----
 
 ## 14. Deployment
 
@@ -423,7 +421,7 @@ The production artifact is the Docker image built from the `production` stage. I
 
 **Observability.** Scrape `/metrics` for request rate, latency histograms, and queue depth. Ship the Pino JSON to a log aggregator and index on `traceId`.
 
----
+
 
 ## 15. Troubleshooting
 
@@ -443,7 +441,6 @@ The production artifact is the Docker image built from the `production` stage. I
 
 **Compose changes appear to have no effect.** Edit `compose.yaml`, not `docker-compose.yml`. Docker resolves the former first; the latter is a deprecated shim that includes it.
 
----
 
 ## 16. Future Improvements
 
@@ -463,7 +460,7 @@ The production artifact is the Docker image built from the `production` stage. I
 
 **Structured audit log for moderation.** Lock, hide, report, and moderator changes are consequential and currently leave no first-class trail.
 
----
+
 
 ## License
 

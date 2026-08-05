@@ -23,7 +23,8 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
 
 	io.use(socketAuthMiddleware);
 
-	// Default room configuration trigger
+	// Room membership is established once per connection rather than per event,
+	// so a client never has to ask to be subscribed to its own notifications.
 	io.on("connection", (socket) => {
 		const authSocket = socket as AuthenticatedSocket;
 		const userId = authSocket.data.userId;
@@ -47,7 +48,9 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
 };
 
 /**
- * Safely fetches the active Socket.IO server engine from anywhere in the codebase.
+ * Returns the running Socket.IO server.
+ * Throws instead of returning null so callers that emit before bootstrap fail
+ * loudly rather than dropping events silently.
  */
 export const getIO = (): Server => {
 	if (!io) {

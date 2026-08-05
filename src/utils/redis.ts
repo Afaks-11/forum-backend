@@ -2,6 +2,11 @@ import { Redis } from "ioredis";
 import { env } from "../config/env.config.js";
 import { logger } from "./logger.js";
 
+/**
+ * Cache facade over a single shared ioredis connection.
+ * Every operation swallows its errors and degrades to a cache miss, so a Redis
+ * outage slows the API down instead of taking it offline.
+ */
 class RedisService {
 	private client: Redis;
 	private url: string;
@@ -141,7 +146,9 @@ class RedisService {
 	}
 
 	/**
-	 * Safely scan and delete all keys matching a wildcard pattern (e.g., "feed:advanced:*")
+	 * Delete every key matching a wildcard pattern (e.g. "feed:advanced:*").
+	 * Uses a cursor-based SCAN rather than KEYS because KEYS blocks the whole
+	 * Redis server for the duration of the sweep.
 	 */
 	async delPattern(pattern: string): Promise<void> {
 		const client = this.client;

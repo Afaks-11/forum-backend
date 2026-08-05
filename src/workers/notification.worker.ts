@@ -5,11 +5,17 @@ import { notificationRepository } from "../repositories/index.js";
 import { getIO } from "../socket/socket.server.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Persists each queued notification, then attempts a realtime push.
+ * The database write happens first so the notification survives even when no
+ * socket server is reachable; the emit is a best-effort optimization on top.
+ */
 export const notificationWorker = new Worker<NotificationJobData>(
 	"notification-queue",
 	async (job: Job<NotificationJobData>) => {
 		const payload = job.data;
 
+		// Acting on your own content should not notify you.
 		if (payload.senderId === payload.recipientId) {
 			return;
 		}
@@ -34,6 +40,8 @@ export const notificationWorker = new Worker<NotificationJobData>(
 				`Real-time notification dispatched directly to user:${payload.recipientId}`,
 			);
 		} catch (socketError) {
+			// A missing socket server must not fail the job: the row is already
+			// stored and the client will see it on its next poll.
 			logger.warn(
 				{ err: socketError },
 				"Socket system offline; falling back to DB storage",

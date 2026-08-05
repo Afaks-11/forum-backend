@@ -10,6 +10,12 @@ class MockRedis {
 	quit = jest.fn(() => Promise.resolve("OK"));
 }
 
+/**
+ * Replaces ioredis and BullMQ with in-memory doubles so unit tests import the
+ * real modules under test without opening sockets or requiring containers.
+ * Must run before the module under test is imported — `unstable_mockModule`
+ * only affects imports resolved after registration.
+ */
 export async function mockCommonModules() {
 	await jest.unstable_mockModule("ioredis", () => ({
 		__esModule: true,

@@ -9,8 +9,13 @@ export const cronQueue = new Queue<CronJobData>("cron-queue", {
 	connection: createQueueConnection(),
 });
 
+/**
+ * Registers the application's repeatable maintenance jobs.
+ * Each job carries a fixed `jobId` so re-running this on every boot updates the
+ * existing schedule instead of stacking duplicate repeaters in Redis.
+ */
 export const initScheduledJobs = async (): Promise<void> => {
-	// Purge old read notifications: Runs daily at midnight
+	// Daily at midnight.
 	await cronQueue.add(
 		"purge-notifications",
 		{ action: "PURGE_OLD_NOTIFICATIONS" },
@@ -22,7 +27,7 @@ export const initScheduledJobs = async (): Promise<void> => {
 		},
 	);
 
-	// Purge soft-deleted posts older than 30 days: Runs weekly on Sunday at 2 AM
+	// Weekly on Sunday at 2 AM.
 	await cronQueue.add(
 		"hard-purge-posts",
 		{ action: "HARD_PURGE_DELETED_POSTS" },

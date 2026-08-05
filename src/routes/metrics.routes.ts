@@ -13,7 +13,6 @@ router.get(
 	requireAdmin,
 	async (_req: Request, res: Response) => {
 		try {
-			// Dynamically compile active job totals from Redis right before responding to the scraper
 			await syncBullMQMetrics();
 
 			res.setHeader("Content-Type", register.contentType);
