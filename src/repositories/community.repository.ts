@@ -11,7 +11,8 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Find community matching a exact name or URL slug
+	 * Checks both unique columns at once, since a new community can collide on
+	 * either the display name or the derived slug.
 	 */
 	async findByNameOrSlug(name: string, slug: string) {
 		return await this.prisma.community.findFirst({
@@ -22,7 +23,9 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Atomically create a community and its initial Moderator membership
+	 * Creates a community and its creator's MODERATOR membership in one
+	 * transaction, so a failure cannot leave a community with no moderator and
+	 * therefore no one able to appoint one.
 	 */
 	async createWithModerator(data: {
 		name: string;
@@ -93,7 +96,8 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Add or reactivate community subscription membership
+	 * Joins a community without downgrading an existing role: the empty update
+	 * means a moderator who re-joins is not reset to MEMBER.
 	 */
 	async upsertMembership(
 		userId: string,
@@ -108,7 +112,7 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Delete user membership association from a community
+	 * Leaves a community. `deleteMany` keeps a repeated leave from throwing.
 	 */
 	async deleteMembership(userId: string, communityId: string) {
 		return await this.prisma.membership.deleteMany({
@@ -185,7 +189,7 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Count active administrators currently assigned to a community moderation panel
+	 * Counts moderators, used to block demoting the last one.
 	 */
 	async countModerators(communityId: string) {
 		return await this.prisma.membership.count({
@@ -224,7 +228,7 @@ export class CommunityRepository {
 	}
 
 	/**
-	 * Finds lightweight community structures by matching name or slug partial tokens.
+	 * Case-insensitive search across community names and slugs.
 	 */
 	async searchCommunities(query: string, limit: number) {
 		return await this.prisma.community.findMany({

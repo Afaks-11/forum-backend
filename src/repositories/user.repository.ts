@@ -169,7 +169,8 @@ export class UserRepository {
 	}
 
 	/**
-	 * Reset password and clear transient reset credentials in a single operation
+	 * Clears the password and both reset fields in one write, so a reset token
+	 * cannot be replayed against the new password.
 	 */
 	async resetPasswordAndClearTokens(id: string, passwordHash: string) {
 		return await this.prisma.user.update({
@@ -237,7 +238,8 @@ export class UserRepository {
 	}
 
 	/**
-	 * Check if a block relation exists in either direction
+	 * Checks for a block in either direction — a block hides the profile from
+	 * both parties, so the caller does not need to know who blocked whom.
 	 */
 	async checkBlockRelation(userA: string, userB: string) {
 		return await this.prisma.block.findFirst({
@@ -282,7 +284,8 @@ export class UserRepository {
 	}
 
 	/**
-	 * Create or ignore follow state safely
+	 * Creates a follow idempotently: an upsert with an empty update keeps a
+	 * repeated follow from raising a unique constraint error.
 	 */
 	async createFollowRelation(followerId: string, followingId: string) {
 		return await this.prisma.follow.upsert({
@@ -295,7 +298,8 @@ export class UserRepository {
 	}
 
 	/**
-	 * Remove explicit follow target relation
+	 * Removes a follow. Uses `deleteMany` so unfollowing when no relation exists
+	 * resolves quietly instead of throwing a record-not-found error.
 	 */
 	async deleteFollowRelation(followerId: string, followingId: string) {
 		return await this.prisma.follow.deleteMany({
@@ -304,7 +308,9 @@ export class UserRepository {
 	}
 
 	/**
-	 * Remove follow links between both users (used during a block event)
+	 * Severs follows in both directions, called when a block is placed so the
+	 * blocked user cannot keep receiving the blocker's activity through an
+	 * existing follow.
 	 */
 	async deleteMutualFollows(userA: string, userB: string) {
 		return await this.prisma.follow.deleteMany({
@@ -318,7 +324,8 @@ export class UserRepository {
 	}
 
 	/**
-	 * Create block state safety record
+	 * Creates a block idempotently, so re-blocking an already-blocked user is
+	 * a no-op rather than a constraint violation.
 	 */
 	async createBlockRelation(blockerId: string, blockedId: string) {
 		return await this.prisma.block.upsert({
@@ -340,7 +347,7 @@ export class UserRepository {
 	}
 
 	/**
-	 * Executes a lightning-fast lightweight partial matching search for user autocompletes.
+	 * Case-insensitive substring match on username, for autocomplete.
 	 */
 	async searchUsers(query: string, limit: number) {
 		return await this.prisma.user.findMany({
@@ -362,8 +369,9 @@ export class UserRepository {
 	}
 
 	/**
-	 * Atomically increases failed login milestones and conditionally applies lock timestamps
-	 * within an isolated transaction sequence to neutralize brute-force race conditions.
+	 * Increments the failed login counter and applies a 15-minute lock on the
+	 * fifth failure, both inside one transaction so a concurrent login cannot
+	 * race past the threshold and bypass the lock.
 	 */
 	async incrementLoginAttemptsAtomic(userId: string) {
 		return await this.prisma.$transaction(async (tx) => {
@@ -379,7 +387,8 @@ export class UserRepository {
 				loginAttempts: nextAttemptsCount,
 			};
 
-			// If threshold crossed, append the locked timestamp boundary inside the exact same transaction write
+			// Apply the lock timestamp only at the threshold, within the same write
+			// that increments the counter, so both land atomically.
 			if (nextAttemptsCount >= 5) {
 				updatePayload.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
 			}

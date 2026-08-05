@@ -28,6 +28,11 @@ interface VoteMetricsPayload {
 	currentUserVote: string | null;
 }
 
+/**
+ * Creates a post inside an existing community.
+ * Every cached feed variant is dropped because a new post can appear in any of
+ * them regardless of the sort or filter that produced the cached entry.
+ */
 export const createPost = async (data: CreatePostInput, authorId: string) => {
 	const community = await communityRepository.findById(data.communityId);
 	if (!community) {
@@ -41,6 +46,10 @@ export const createPost = async (data: CreatePostInput, authorId: string) => {
 	return newPost;
 };
 
+/**
+ * Fetches a single post through a one-hour cache.
+ * Soft-deleted posts are excluded by the repository, so this 404s for them.
+ */
 export const getPostById = async (id: string) => {
 	const cacheKey = `post:${id}`;
 
@@ -54,6 +63,9 @@ export const getPostById = async (id: string) => {
 	return post;
 };
 
+/**
+ * Edits a post's title and/or content. Author-only.
+ */
 export const updatePostFields = async (
 	postId: string,
 	userId: string,
@@ -64,7 +76,6 @@ export const updatePostFields = async (
 	if (post.authorId !== userId)
 		throw new AppError("Forbidden: You do not own this post", 403);
 
-	// Avoid exactOptionalPropertyTypes compilation block by safely processing missing elements
 	const updatePayload: { title?: string; content?: string } = {};
 	if (data.title !== undefined) updatePayload.title = data.title;
 	if (data.content !== undefined) updatePayload.content = data.content;
@@ -78,23 +89,10 @@ export const updatePostFields = async (
 	return updatedPost;
 };
 
-// export const getAllActivePosts = async () => {
-// 	return await prisma.post.findMany({
-// 		where: {
-// 			deletedAt: null,
-// 		},
-// 		include: {
-// 			user: {
-// 				select: { username: true },
-// 			},
-// 			community: {
-// 				select: { name: true },
-// 			},
-// 		},
-// 		orderBy: { createdAt: "desc" },
-// 	});
-// };
-
+/**
+ * Marks a post deleted without removing the row, so its comments, votes, and
+ * moderation history remain intact for auditing. Author-only.
+ */
 export const softDeletePost = async (postId: string, userId: string) => {
 	const post = await postRepository.findUniqueById(postId);
 	if (!post) throw new AppError("Post not found", 404);
@@ -110,6 +108,9 @@ export const softDeletePost = async (postId: string, userId: string) => {
 	return result;
 };
 
+/**
+ * Cursor-paginated feed with sort and filter support, cached for five minutes.
+ */
 export const getAdvancedPostsFeed = async (filters: {
 	sort?: "new" | "top" | "hot" | "controversial";
 	community?: string;
@@ -117,6 +118,8 @@ export const getAdvancedPostsFeed = async (filters: {
 	cursor?: string;
 	limit?: number;
 }) => {
+	// The filter set is hashed into the key so each sort/community/cursor
+	// combination caches independently instead of overwriting one another.
 	const filterHash = Buffer.from(JSON.stringify(filters)).toString("base64");
 	const cacheKey = `feed:advanced:${filterHash}`;
 
@@ -129,6 +132,9 @@ export const getAdvancedPostsFeed = async (filters: {
 	return feed;
 };
 
+/**
+ * Adds or removes a post from the caller's saved list.
+ */
 export const savePostAction = async (
 	postId: string,
 	userId: string,
@@ -144,6 +150,11 @@ export const savePostAction = async (
 	}
 };
 
+/**
+ * Applies a moderation action to a post. Each branch enforces its own
+ * authorization: LOCK allows the author or a mod/admin, PIN is mod/admin only,
+ * and REPORT is open to any authenticated user.
+ */
 export const modifyPostModerationState = async (
 	postId: string,
 	userId: string,
@@ -202,10 +213,19 @@ export const modifyPostModerationState = async (
 			return await reportRepository.create(postId, userId, reasonText);
 
 		case "HIDE":
+			// Hiding is a per-viewer preference held client-side; there is no
+			// server-side state to mutate, so this branch is a deliberate no-op.
 			return { success: true, message: "Cached user-hide request processed" };
 	}
 };
 
+/**
+ * Returns a post's vote tally plus the caller's own vote.
+ *
+ * Cached per viewer, because `currentUserVote` varies by authentication state —
+ * a shared entry would leak one user's vote to everyone else. Invalidation
+ * therefore has to sweep the whole `post:<id>:vote_metrics:*` family.
+ */
 export const getPostVoteMetrics = async (
 	postId: string,
 	currentUserId?: string,
@@ -242,10 +262,15 @@ export const getPostVoteMetrics = async (
 	return metricsPayload;
 };
 
+/**
+ * Cursor-paginated post search with a three-minute cache.
+ */
 export const searchForPosts = async (
 	data: PostSearchInput,
 ): Promise<SearchPostsResult> => {
 	const normalizedQuery = data.query.toLowerCase().trim();
+	// A literal stands in for the first page so the key shape stays uniform;
+	// an empty segment would make `cursor:` collide across distinct queries.
 	const safeCursor = data.cursor || "none";
 
 	const cacheKey = `search:posts:${normalizedQuery}:limit:${data.limit}:cursor:${safeCursor}`;

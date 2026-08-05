@@ -19,6 +19,11 @@ export class PostRepository {
 		});
 	}
 
+	/**
+	 * Fetches an active post with author, community, and engagement counts.
+	 * Soft-deleted rows are filtered out, which is why this is `findFirst`
+	 * rather than `findUnique` despite the ID being unique.
+	 */
 	async findById(id: string) {
 		return await this.prisma.post.findFirst({
 			where: { id, deletedAt: null },
@@ -30,6 +35,10 @@ export class PostRepository {
 		});
 	}
 
+	/**
+	 * Fetches a post regardless of soft-delete state, for ownership and
+	 * moderation checks that must still see deleted rows.
+	 */
 	async findUniqueById(id: string) {
 		return await this.prisma.post.findUnique({
 			where: { id },
@@ -37,10 +46,12 @@ export class PostRepository {
 	}
 
 	/**
-	 * Pulls active posts for a list of specific IDs.
-	 * Preserves standard schema structures from your advanced feed.
+	 * Bulk-fetches active posts by ID for the ranked feed paths.
+	 * Result order is not guaranteed to match `ids`; callers that need the
+	 * ranking preserved must reorder.
 	 */
 	async findManyByIds(ids: string[]) {
+		// Prisma would emit `IN ()` for an empty list, so short-circuit instead.
 		if (ids.length === 0) return [];
 
 		return await this.prisma.post.findMany({
@@ -57,7 +68,7 @@ export class PostRepository {
 	}
 
 	/**
-	 * Pulls recent active posts to allow background workers to process ranking updates.
+	 * Feeds the ranking worker the newest active posts to rescore.
 	 */
 	async findRecentActivePosts(limit: number) {
 		return await this.prisma.post.findMany({
@@ -84,6 +95,9 @@ export class PostRepository {
 		});
 	}
 
+	/**
+	 * Adds a post to a user's saved list idempotently.
+	 */
 	async save(postId: string, userId: string) {
 		return await this.prisma.savedPost.upsert({
 			where: { userId_postId: { userId, postId } },
@@ -112,6 +126,9 @@ export class PostRepository {
 		});
 	}
 
+	/**
+	 * Cursor-paginated feed with optional community/author filters and sorting.
+	 */
 	async getAdvancedFeed(filters: {
 		sort?: "new" | "top" | "hot" | "controversial";
 		community?: string;
@@ -136,6 +153,9 @@ export class PostRepository {
 			createdAt: "desc",
 		};
 
+		// Hot and controversial fall back to a vote-count ordering here; their
+		// real scoring lives in the Redis ZSETs maintained by the ranking worker
+		// and is only reached when those sets are unavailable or filtered out.
 		if (filters.sort === "top") {
 			orderByClause = { votes: { _count: "desc" } };
 		} else if (filters.sort === "hot" || filters.sort === "controversial") {
@@ -144,6 +164,8 @@ export class PostRepository {
 
 		const posts = await this.prisma.post.findMany({
 			where: whereClause,
+			// One extra row is fetched purely to detect whether another page
+			// exists; it is popped below and never returned.
 			take: take + 1,
 			skip: filters.cursor ? 1 : 0,
 			include: {
@@ -164,6 +186,9 @@ export class PostRepository {
 		return { posts, nextCursor };
 	}
 
+	/**
+	 * Counts upvotes and downvotes in parallel, as neither depends on the other.
+	 */
 	async getVoteMetrics(postId: string) {
 		const [upvotes, downvotes] = await Promise.all([
 			this.prisma.vote.count({ where: { postId, type: "UPVOTE" } }),
@@ -179,7 +204,8 @@ export class PostRepository {
 	}
 
 	/**
-	 * Executes partial keyword queries across active posts matching titles or contents.
+	 * Case-insensitive keyword search over active post titles and bodies,
+	 * cursor-paginated in the same shape as the feed.
 	 */
 	async searchPosts(filters: {
 		query: string;

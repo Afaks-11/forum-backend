@@ -8,10 +8,17 @@ cloudinary.config({
 	secure: true,
 });
 
+/**
+ * Signs a direct-to-Cloudinary upload so clients can upload without proxying
+ * the file through this server or ever seeing the API secret.
+ */
 export const generateCloudinarySignature = (folder: string) => {
+	// Cloudinary expects seconds, not milliseconds, and rejects signatures whose
+	// timestamp drifts too far from its own clock.
 	const timestamp = Math.round(Date.now() / 1000);
 
-	// You can lock down the upload by specifying a folder or transformations here
+	// Only these parameters are signed, so the client cannot redirect the upload
+	// to a different folder without invalidating the signature.
 	const paramsToSign = {
 		timestamp,
 		folder,

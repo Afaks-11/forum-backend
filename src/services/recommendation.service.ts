@@ -57,7 +57,9 @@ export const getRecommendedPosts = async (
 	if (cached) return cached;
 
 	if (!userId) {
-		// Guests receive the current global "New" feed as a fallback
+		// Fallback feeds return before the cache write below. Anonymous and
+		// history-less users would otherwise be pinned to a generic feed for the
+		// full TTL even after they start interacting.
 		const defaultFeed = await postRepository.getAdvancedFeed({
 			sort: "new",
 			limit,
@@ -65,12 +67,10 @@ export const getRecommendedPosts = async (
 		return defaultFeed.posts;
 	}
 
-	// Analyze user affinity clusters
 	const preferredCommunities =
 		await recommendationRepository.getUserInteractedCommunityIds(userId);
 
 	if (preferredCommunities.length === 0) {
-		// If the user has no history yet, fall back to global high-engagement content
 		const defaultFeed = await postRepository.getAdvancedFeed({
 			sort: "top",
 			limit,
@@ -78,7 +78,6 @@ export const getRecommendedPosts = async (
 		return defaultFeed.posts;
 	}
 
-	// Extract personalized content matching the affinity clusters
 	const recommendedPosts =
 		await recommendationRepository.getRecommendedPostsFromCommunities(
 			userId,

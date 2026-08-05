@@ -17,6 +17,10 @@ import type {
 	UpdateMeInput,
 } from "../validators/auth.validator.js";
 
+/**
+ * Registers a new account and queues its verification email.
+ * The returned user is unverified until the emailed token is redeemed.
+ */
 export const registerUser = async (data: RegisterInput) => {
 	const existingUser = await userRepository.findByEmailOrUsername(
 		data.email,
@@ -47,10 +51,16 @@ export const registerUser = async (data: RegisterInput) => {
 	return newUser;
 };
 
+/**
+ * Authenticates a credential pair and issues an access/refresh token pair.
+ * Applies the failed-attempt lockout and rejects unverified or deleted accounts.
+ */
 export const loginUser = async (data: LoginInput) => {
 	const user = await userRepository.findByEmail(data.email);
 
-	// FIXED: Mitigate User Enumeration via Timing Attacks
+	// Always run a bcrypt comparison, even for unknown emails. Skipping it would
+	// let an attacker distinguish registered from unregistered addresses by
+	// response latency alone.
 	const DUMMY_HASH =
 		"$2b$10$abcdefghijklmnopqrstuvwxyzA1234567890FakeHashForTimingDef";
 	const hashToValidate = user ? user.password : DUMMY_HASH;
@@ -65,13 +75,11 @@ export const loginUser = async (data: LoginInput) => {
 
 	if (!user || !isPasswordValid) {
 		if (user) {
-			// The atomic execution wrapper applies thresholding and sets the lock window safely.
 			const updatedUser = await userRepository.incrementLoginAttemptsAtomic(
 				user.id,
 			);
 
 			if (updatedUser.loginAttempts === 5) {
-				// Ensure the security notification fires exactly ONCE when crossing the limit
 				await emailQueue.add(`login-attempt-failed:${user.id}`, {
 					to: user.email,
 					subject: "Security Alert: Too many failed login attempts",
@@ -100,7 +108,6 @@ export const loginUser = async (data: LoginInput) => {
 		);
 	}
 
-	// Clear dynamic lockout rate limits on success path
 	await userRepository.updateLoginLockState(user.id, {
 		loginAttempts: 0,
 		lockUntil: null,
@@ -110,6 +117,9 @@ export const loginUser = async (data: LoginInput) => {
 		expiresIn: "15m",
 	});
 
+	// The password hash is folded into the refresh secret so that changing or
+	// resetting a password invalidates every outstanding refresh token for that
+	// user without needing a separate revocation record.
 	const refreshToken = jwt.sign(
 		{ userId: user.id },
 		env.jwt.refreshSecret + user.password,
@@ -134,6 +144,10 @@ export const loginUser = async (data: LoginInput) => {
 	};
 };
 
+/**
+ * Exchanges a refresh token for a fresh access token.
+ * Rejects blacklisted tokens and tokens signed against a since-changed password.
+ */
 export const refreshAccessToken = async (token: string) => {
 	const isBlacklisted = await tokenBlacklistRepository.isBlacklisted(token);
 	if (isBlacklisted) {
@@ -167,6 +181,10 @@ export const refreshAccessToken = async (token: string) => {
 	}
 };
 
+/**
+ * Denylists a refresh token for whatever lifetime it has left.
+ * Expired or unparseable tokens are ignored — they are already unusable.
+ */
 export const blacklistRefreshToken = async (token: string): Promise<void> => {
 	try {
 		const decoded = jwt.decode(token) as { exp?: number };
@@ -201,9 +219,17 @@ export const updateUserProfile = async (
 	return await userRepository.updateProfile(userId, data);
 };
 
+/**
+ * Soft-deletes the account so authored content and audit history survive.
+ * Every auth path checks `deletedAt`, which is what makes the row inert.
+ */
 export const deleteUserAccount = async (userId: string) => {
 	return await userRepository.softDelete(userId);
 };
+/**
+ * Rotates a password after re-verifying the caller's current one.
+ * Because refresh tokens are signed with the old hash, this invalidates them.
+ */
 export const changeUserPassword = async (
 	data: ChangePasswordInput,
 	userId: string,
@@ -219,6 +245,10 @@ export const changeUserPassword = async (
 	await userRepository.updatePassword(userId, newHashedPassword);
 };
 
+/**
+ * Issues a 15-minute password reset token and emails it.
+ * Returns silently for unknown or deleted accounts to prevent enumeration.
+ */
 export const processForgotPassword = async (email: string) => {
 	const user = await userRepository.findByEmail(email);
 	if (!user || user.deletedAt) return;
@@ -239,6 +269,10 @@ export const processForgotPassword = async (email: string) => {
 	});
 };
 
+/**
+ * Reissues a verification token and its 24-hour expiry together.
+ * Both must rotate as a pair, or an account can never be verified again.
+ */
 export const resendVerificationToken = async (email: string) => {
 	const user = await userRepository.findByEmail(email);
 
@@ -264,6 +298,9 @@ export const resendVerificationToken = async (email: string) => {
 	});
 };
 
+/**
+ * Consumes a reset token, rehashes the new password, and clears the token pair.
+ */
 export const processResetPassword = async (data: ResetPasswordInput) => {
 	const user = await userRepository.findByResetToken(data.token);
 
@@ -277,6 +314,9 @@ export const processResetPassword = async (data: ResetPasswordInput) => {
 	await userRepository.resetPasswordAndClearTokens(user.id, hashedNewPassword);
 };
 
+/**
+ * Redeems an email verification token, rejecting unknown or expired ones.
+ */
 export const verifyUserEmail = async (token: string) => {
 	const user = await userRepository.findByVerifyToken(token);
 	if (!user) throw new AppError("Invalid or expired verification token", 401);

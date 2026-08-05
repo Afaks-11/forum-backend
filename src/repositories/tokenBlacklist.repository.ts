@@ -8,7 +8,9 @@ export class TokenBlacklistRepository {
 	}
 
 	/**
-	 * Add a refresh token to the blacklist with a set Time-To-Live (TTL) in seconds
+	 * Revokes a token until it would have expired anyway. The TTL matches the
+	 * token's remaining lifetime so entries expire themselves and the blacklist
+	 * never grows without bound.
 	 */
 	async blacklist(token: string, ttlSeconds: number): Promise<void> {
 		await redis

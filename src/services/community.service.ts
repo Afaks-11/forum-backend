@@ -19,6 +19,11 @@ type CommunityFeedPayload = Awaited<
 	ReturnType<typeof communityRepository.findPostsByCommunityId>
 >;
 
+/**
+ * Resolves a community by slug through a 24-hour cache.
+ * Shared by every slug-addressed operation below, so a miss is read once and
+ * reused rather than refetched per call site.
+ */
 const getCommunityBySlug = async (slug: string) => {
 	const cacheKey = `community:slug:${slug}`;
 
@@ -42,6 +47,11 @@ const checkModPermission = async (communityId: string, userId: string) => {
 	}
 };
 
+/**
+ * Creates a community and installs its creator as the first moderator.
+ * Name and slug are both checked because the slug is a lowercased name and two
+ * differently-cased names would otherwise collide on the slug unique index.
+ */
 export const createCommunity = async (
 	data: CreateCommunityInput,
 	creatorId: string,
@@ -78,6 +88,9 @@ export const getCommunityDetails = async (slug: string) => {
 	return await getCommunityBySlug(slug);
 };
 
+/**
+ * Adds the caller as a MEMBER, or leaves an existing role untouched on re-join.
+ */
 export const joinCommunityAction = async (userId: string, slug: string) => {
 	const group = await getCommunityBySlug(slug);
 	await communityRepository.upsertMembership(
@@ -86,6 +99,8 @@ export const joinCommunityAction = async (userId: string, slug: string) => {
 		MembershipRole.MEMBER,
 	);
 
+	// Both the community record and the list carry member counts, so a
+	// membership change makes each stale.
 	await redis.del(`community:slug:${slug}`);
 	await redis.del("communities:list");
 };
@@ -111,6 +126,9 @@ export const getCommunityPostsFeed = async (slug: string) => {
 	return feed;
 };
 
+/**
+ * Lists memberships for a community, optionally narrowed to a single role.
+ */
 export const getGroupRoster = async (
 	slug: string,
 	roleType?: "MEMBER" | "MODERATOR",
@@ -172,6 +190,10 @@ export const updateCommunityMediaAsset = async (
 	return result;
 };
 
+/**
+ * Permanently removes a community. Restricted to the original creator —
+ * moderator rights are not sufficient for a destructive, irreversible action.
+ */
 export const deleteCommunityAction = async (slug: string, userId: string) => {
 	const group = await getCommunityBySlug(slug);
 	if (group.creatorId !== userId)
@@ -186,6 +208,10 @@ export const deleteCommunityAction = async (slug: string, userId: string) => {
 	await redis.del(`feed:community:${slug}`);
 };
 
+/**
+ * Notifies a user that they have been invited to a community.
+ * Sends an invitation notification only; it does not create a membership.
+ */
 export const inviteUserToCommunitySpace = async (
 	communitySlug: string,
 	targetUsername: string,
@@ -212,6 +238,10 @@ export const inviteUserToCommunitySpace = async (
 	});
 };
 
+/**
+ * Grants MODERATOR to a target user, creating their membership if absent.
+ * Only an existing moderator of the same community may appoint another.
+ */
 export async function assignModeratorRole(
 	communityId: string,
 	targetUserId: string,
@@ -269,6 +299,9 @@ export async function assignModeratorRole(
 	};
 }
 
+/**
+ * Demotes a moderator back to MEMBER, refusing to remove the last one.
+ */
 export async function revokeModeratorRole(
 	communityId: string,
 	targetUserId: string,
@@ -298,6 +331,8 @@ export async function revokeModeratorRole(
 		);
 	}
 
+	// Refuse to demote the last moderator: the community would be left with no
+	// one able to moderate it or appoint a replacement.
 	const totalModsRemaining =
 		await communityRepository.countModerators(communityId);
 
@@ -327,7 +362,11 @@ export async function revokeModeratorRole(
 	};
 }
 
+/**
+ * Full-text community search, cached per normalized query and limit.
+ */
 export const searchForCommunities = async (data: CommunitySearchInput) => {
+	// Lowercased and trimmed so that equivalent queries share one cache entry.
 	const normalizedQuery = data.query.toLowerCase().trim();
 	const cacheKey = `search:communities:${normalizedQuery}:limit:${data.limit}`;
 	const TTL_SECONDS = 300; // 5-minute cache lifespan

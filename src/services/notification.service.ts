@@ -10,6 +10,9 @@ export const getUnreadNotifications = async (recipientId: string) => {
 	return await notificationRepository.findUnreadByRecipientId(recipientId);
 };
 
+/**
+ * Marks one notification read, rejecting callers who are not its recipient.
+ */
 export const markNotificationAsRead = async (
 	id: string,
 	recipientId: string,
@@ -38,6 +41,11 @@ export const deleteNotification = async (id: string, recipientId: string) => {
 	return await notificationRepository.delete(id);
 };
 
+/**
+ * Queues a notification for realtime/email delivery by the notification worker.
+ * Self-triggered actions (user commenting on their own post) are suppressed to
+ * avoid noise; no one needs to be notified about what they just did themselves.
+ */
 export const sendInternalNotification = async (payload: {
 	recipientId: string;
 	senderId?: string;
@@ -51,7 +59,8 @@ export const sendInternalNotification = async (payload: {
 	content: string;
 	link?: string;
 }) => {
-	// If the user triggers an action on their own stuff, suppress the alert
+	// Suppress notifications the user triggered on their own content: no one
+	// wants an alert that they replied to their own comment.
 	if (payload.senderId === payload.recipientId) return null;
 
 	return await notificationQueue.add(

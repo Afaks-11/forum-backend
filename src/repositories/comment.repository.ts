@@ -63,7 +63,8 @@ export class CommentRepository {
 	}
 
 	/**
-	 * Standard user soft-deletion (retains database row with timestamps)
+	 * Author soft delete. The row is retained so nested replies keep a valid
+	 * parent and the thread does not collapse.
 	 */
 	async softDelete(id: string) {
 		return await this.prisma.comment.update({
@@ -83,7 +84,8 @@ export class CommentRepository {
 	}
 
 	/**
-	 * Force-overwrite sensitive content and mark thread as deleted
+	 * Moderator removal. Unlike a user soft delete, the body is overwritten as
+	 * well as stamped, so offending content cannot be recovered from the row.
 	 */
 	async removeByModerator(id: string) {
 		return await this.prisma.comment.update({

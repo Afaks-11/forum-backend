@@ -13,11 +13,18 @@ type AdvancedFeedPayload = Awaited<
 	ReturnType<typeof postRepository.getAdvancedFeed>
 >;
 
+/**
+ * Returns a cursor-paginated feed sorted by new, top, hot, or controversial.
+ *
+ * Hot and controversial without filters hit Redis sorted sets (ZSETs) built by
+ * the ranking worker; all other paths cache the repository result. The ZSET
+ * path uses offset pagination because Redis ZREVRANGE returns by rank, not by
+ * cursor.
+ */
 export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 	const targetSort = filters.sort ?? "new";
 	const targetLimit = filters.limit ?? 10;
 
-	// Handling Hot & Controversial Algorithms via Redis ZSETs
 	if (
 		(targetSort === "hot" || targetSort === "controversial") &&
 		!filters.community &&
@@ -37,10 +44,15 @@ export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 		if (rankedIds.length > 0) {
 			const postsData = await postRepository.findManyByIds(rankedIds);
 
+			// Restore the original ZSET ordering: Redis returns IDs by rank but does
+			// not guarantee the order of the bulk-fetch result, so the list is rebuilt
+			// by matching each ranked ID to its post record.
 			const orderedPosts = rankedIds
 				.map((id: string) => postsData.find((post) => post.id === id))
 				.filter((post): post is NonNullable<typeof post> => !!post);
 
+			// Peek one rank past the page to decide whether a next cursor exists,
+			// avoiding a cursor that leads to an empty page.
 			const checkNextIds: string[] = await rawRedisClient.zrevrange(
 				zsetKey,
 				stopOffset + 1,
@@ -63,6 +75,8 @@ export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 	const cachedFeed = await redis.get<AdvancedFeedPayload>(cacheKey);
 	if (cachedFeed) return cachedFeed;
 
+	// Rebuilt key by key instead of spread: the incoming type permits explicit
+	// `undefined`, which `exactOptionalPropertyTypes` will not accept downstream.
 	const repoFilters: {
 		sort?: "new" | "top" | "hot" | "controversial";
 		community?: string;

@@ -5,6 +5,10 @@ import { logger } from "../utils/logger.js";
 import type { CreateCommentInput } from "../validators/comment.validator.js";
 import { sendInternalNotification } from "./notification.service.js";
 
+/**
+ * Creates a top-level comment or a threaded reply.
+ * Locked posts and locked parent threads both reject new entries.
+ */
 export const createComment = async (
 	data: CreateCommentInput,
 	authorId: string,
@@ -39,6 +43,8 @@ export const createComment = async (
 			const io = getIO();
 			io.to(`post:${data.postId}`).emit("comment:new", reply);
 		} catch (_socketError) {
+			// The reply is already persisted, so a missing socket server must not
+			// fail the request — realtime delivery is best-effort on top of the write.
 			logger.warn(
 				"[Live Comments] Socket server offline; falling back to DB storage only.",
 			);
@@ -78,6 +84,9 @@ export const getPostComments = async (postId: string) => {
 	return await commentRepository.findManyActiveByPostId(postId);
 };
 
+/**
+ * Edits a comment's body. Author-only; soft-deleted comments are treated as absent.
+ */
 export const updateCommentFields = async (
 	commentId: string,
 	userId: string,
@@ -91,6 +100,10 @@ export const updateCommentFields = async (
 	return await commentRepository.updateFields(commentId, content);
 };
 
+/**
+ * Marks a comment deleted without unlinking its replies, keeping the thread
+ * structure readable. Author-only.
+ */
 export const softDeleteComment = async (commentId: string, userId: string) => {
 	const comment = await commentRepository.findById(commentId);
 	if (!comment || comment.deletedAt)
@@ -101,6 +114,10 @@ export const softDeleteComment = async (commentId: string, userId: string) => {
 	return await commentRepository.softDelete(commentId);
 };
 
+/**
+ * Applies a moderation or bookmark action to a comment.
+ * LOCK toggles rather than sets, so the caller need not read current state first.
+ */
 export const modifyCommentState = async (
 	commentId: string,
 	userId: string,
@@ -137,6 +154,8 @@ export const modifyCommentState = async (
 			break;
 
 		case "SAVE": {
+			// Saving is idempotent: a repeat request must not raise a unique
+			// constraint violation on the relation.
 			const alreadySaved = await commentRepository.findSavedRelation(
 				userId,
 				commentId,

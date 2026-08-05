@@ -9,6 +9,9 @@ import { TokenBlacklistRepository } from "./tokenBlacklist.repository.js";
 import { UserRepository } from "./user.repository.js";
 import { VoteRepository } from "./vote.repository.js";
 
+// Single composition root for the data layer: every repository is instantiated
+// once against the shared Prisma client, so services import ready singletons and
+// never construct their own client. Unit tests mock this module wholesale.
 export const postRepository = new PostRepository(prisma);
 export const communityRepository = new CommunityRepository(prisma);
 export const reportRepository = new ReportRepository(prisma);

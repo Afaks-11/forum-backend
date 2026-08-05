@@ -17,6 +17,10 @@ const invalidateVoteMetrics = async (postId: string): Promise<void> => {
 	await redis.delPattern(`post:${postId}:vote_metrics:*`);
 };
 
+/**
+ * Applies a vote as a three-way toggle: recasting the same type retracts it,
+ * a differing type flips it, and no prior vote creates one.
+ */
 export const castVote = async (data: CastVoteInput, userId: string) => {
 	const post = await postRepository.findById(data.postId);
 	if (!post) throw new AppError("Post not found", 404);

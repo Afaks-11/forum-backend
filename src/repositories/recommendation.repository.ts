@@ -63,7 +63,9 @@ export class RecommendationRepository {
 				type: "UPVOTE",
 				post: { deletedAt: null },
 			},
-			take: 50, // Scan recent interactions
+			// Sample a fixed window of recent votes rather than the user's whole
+			// history: enough signal to infer affinity without an unbounded scan.
+			take: 50,
 			select: {
 				post: {
 					select: { communityId: true },
@@ -75,12 +77,14 @@ export class RecommendationRepository {
 			.map((v) => v.post?.communityId)
 			.filter((id): id is string => !!id);
 
-		// Return unique array set values
+		// Deduplicate before slicing: many votes cluster in the same community, so
+		// slicing first would yield far fewer than `limit` distinct communities.
 		return [...new Set(ids)].slice(0, limit);
 	}
 
 	/**
-	 * Pulls highly-rated posts from targeted community clusters that the user hasn't authored.
+	 * Pulls recent posts from the user's affinity communities, excluding their
+	 * own so recommendations do not surface content they wrote.
 	 */
 	async getRecommendedPostsFromCommunities(
 		userId: string,

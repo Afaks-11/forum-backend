@@ -4,7 +4,8 @@ export class VoteRepository {
 	constructor(private readonly prisma: PrismaClient) {}
 
 	/**
-	 * Look up an existing vote using the compound unique identifier
+	 * Looks up a user's vote on a post via the `(userId, postId)` compound
+	 * unique, which is what enforces one vote per user per post.
 	 */
 	async findUniqueVote(userId: string, postId: string) {
 		return await this.prisma.vote.findUnique({

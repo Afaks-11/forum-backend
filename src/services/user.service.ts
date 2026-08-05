@@ -21,6 +21,12 @@ const getTargetUser = async (username: string) => {
 	return target;
 };
 
+/**
+ * Returns a public profile with follower counters and the viewer's follow state.
+ *
+ * Cached per viewer because `isFollowing` and block visibility both depend on
+ * who is asking; a shared entry would expose one viewer's relationship to all.
+ */
 export const getUserProfileByUsername = async (
 	username: string,
 	currentUserId?: string,
@@ -39,7 +45,9 @@ export const getUserProfileByUsername = async (
 			currentUserId,
 			targetUser.id,
 		);
-		if (isBlocked) throw new AppError("Profile unavailable", 404); // Obliterate profile access silently for safety
+		// Report a block as "not found" rather than 403: confirming the profile
+		// exists but is blocked would tell the blocked party they were blocked.
+		if (isBlocked) throw new AppError("Profile unavailable", 404);
 	}
 
 	const profile = await userRepository.findProfileWithCounters(targetUser.id);
@@ -90,6 +98,10 @@ export const getUserCommentsByUsername = async (username: string) => {
 	return comments;
 };
 
+/**
+ * Follows a user. Both profiles are invalidated because each one's cached
+ * follower/following counters and `isFollowing` flag have just changed.
+ */
 export const followUserAction = async (
 	currentUserId: string,
 	targetUsername: string,
@@ -106,6 +118,9 @@ export const followUserAction = async (
 	await redis.delPattern(`profile:username:${targetUsername}:*`);
 };
 
+/**
+ * Removes a follow relation and invalidates both sides' cached profiles.
+ */
 export const unfollowUserAction = async (
 	currentUserId: string,
 	targetUsername: string,
@@ -120,6 +135,10 @@ export const unfollowUserAction = async (
 	await redis.delPattern(`profile:username:${targetUsername}:*`);
 };
 
+/**
+ * Blocks a user, tearing down any follow relation in either direction first so
+ * a block cannot be circumvented by a pre-existing follow.
+ */
 export const blockUserAction = async (
 	currentUserId: string,
 	targetUsername: string,
@@ -138,6 +157,9 @@ export const blockUserAction = async (
 	await redis.delPattern(`profile:username:${targetUsername}:*`);
 };
 
+/**
+ * Lifts a block. Follows severed by the original block are not restored.
+ */
 export const unblockUserAction = async (
 	currentUserId: string,
 	targetUsername: string,
