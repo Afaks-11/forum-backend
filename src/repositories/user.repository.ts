@@ -25,7 +25,7 @@ export class UserRepository {
 		data: RegisterInput & {
 			passwordHash: string;
 			verificationToken: string;
-			verificationTokenExpires: Date;
+			emailVerifyTokenExpires: Date;
 		},
 	) {
 		return await this.prisma.user.create({
@@ -34,7 +34,7 @@ export class UserRepository {
 				email: data.email,
 				password: data.passwordHash,
 				emailVerifyToken: data.verificationToken,
-				verificationTokenExpires: data.verificationTokenExpires,
+				emailVerifyTokenExpires: data.emailVerifyTokenExpires,
 			},
 			select: {
 				id: true,
@@ -187,17 +187,17 @@ export class UserRepository {
 	 * Update or cycle a user's verification token.
 	 *
 	 * The expiry is rotated with the token, never independently: issuing a fresh
-	 * token while leaving a lapsed `verificationTokenExpires` in place would make
+	 * token while leaving a lapsed `emailVerifyTokenExpires` in place would make
 	 * the new token dead on arrival and lock the account out of verification.
 	 */
 	async updateVerificationToken(
 		id: string,
 		emailVerifyToken: string | null,
-		verificationTokenExpires: Date | null,
+		emailVerifyTokenExpires: Date | null,
 	) {
 		return await this.prisma.user.update({
 			where: { id },
-			data: { emailVerifyToken, verificationTokenExpires },
+			data: { emailVerifyToken, emailVerifyTokenExpires },
 		});
 	}
 
@@ -210,7 +210,7 @@ export class UserRepository {
 			data: {
 				isEmailVerified: true,
 				emailVerifyToken: null,
-				verificationTokenExpires: null,
+				emailVerifyTokenExpires: null,
 			},
 		});
 	}
@@ -348,6 +348,10 @@ export class UserRepository {
 
 	/**
 	 * Case-insensitive substring match on username, for autocomplete.
+	 *
+	 * Relation counts rather than full relation rows: the previous form selected
+	 * every post, follow, and community per match, which grew the payload
+	 * without bound on active accounts.
 	 */
 	async searchUsers(query: string, limit: number) {
 		return await this.prisma.user.findMany({
@@ -356,14 +360,20 @@ export class UserRepository {
 					contains: query,
 					mode: "insensitive",
 				},
+				deletedAt: null,
 			},
 			take: limit,
 			select: {
+				id: true,
 				username: true,
-				following: true,
-				followers: true,
-				posts: true,
-				communities: true,
+				_count: {
+					select: {
+						following: true,
+						followers: true,
+						posts: true,
+						ownedCommunities: true,
+					},
+				},
 			},
 		});
 	}

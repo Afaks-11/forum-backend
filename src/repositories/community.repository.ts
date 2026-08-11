@@ -142,7 +142,7 @@ export class CommunityRepository {
 				communityId,
 				...(role && { role }),
 			},
-			select: { role: true, joinedAt: true, userId: true },
+			select: { role: true, createdAt: true, userId: true },
 		});
 	}
 

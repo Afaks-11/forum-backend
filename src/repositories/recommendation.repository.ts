@@ -65,6 +65,7 @@ export class RecommendationRepository {
 			},
 			// Sample a fixed window of recent votes rather than the user's whole
 			// history: enough signal to infer affinity without an unbounded scan.
+			orderBy: { createdAt: "desc" },
 			take: 50,
 			select: {
 				post: {
@@ -102,9 +103,9 @@ export class RecommendationRepository {
 				createdAt: "desc",
 			},
 			include: {
-				user: { select: { username: true } },
+				author: { select: { username: true } },
 				community: { select: { name: true, slug: true } },
-				_count: { select: { comment: true, votes: true } },
+				_count: { select: { comments: true } },
 			},
 		});
 	}

@@ -33,13 +33,13 @@ export const registerUser = async (data: RegisterInput) => {
 	const salt = await bcrypt.genSalt(10);
 	const hashedPassword = await bcrypt.hash(data.password, salt);
 	const verificationToken = crypto.randomBytes(32).toString("hex");
-	const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+	const emailVerifyTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 	const newUser = await userRepository.create({
 		...data,
 		passwordHash: hashedPassword,
 		verificationToken,
-		verificationTokenExpires,
+		emailVerifyTokenExpires,
 	});
 	await emailQueue.add(`verify-email:${newUser.id}`, {
 		to: newUser.email,
@@ -321,8 +321,8 @@ export const verifyUserEmail = async (token: string) => {
 	const user = await userRepository.findByVerifyToken(token);
 	if (!user) throw new AppError("Invalid or expired verification token", 401);
 	if (
-		!user.verificationTokenExpires ||
-		user.verificationTokenExpires < new Date()
+		!user.emailVerifyTokenExpires ||
+		user.emailVerifyTokenExpires < new Date()
 	) {
 		throw new AppError("Verification token has expired", 401);
 	}

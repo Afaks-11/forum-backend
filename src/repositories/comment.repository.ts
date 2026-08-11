@@ -46,7 +46,7 @@ export class CommentRepository {
 				deletedAt: null,
 			},
 			include: {
-				user: { select: { username: true, id: true } },
+				author: { select: { username: true, id: true } },
 			},
 			orderBy: { createdAt: "asc" },
 		});
