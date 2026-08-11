@@ -95,13 +95,15 @@ export const postResponseSchema = z
 		authorId: z.uuid(),
 		isLocked: z.boolean(),
 		isPinned: z.boolean(),
-		isHidden: z.boolean(),
 		createdAt: z.date(),
 		updatedAt: z.date(),
+		upvoteCount: z.number().int(),
+		downvoteCount: z.number().int(),
+		score: z.number().int(),
+		currentUserVote: z.enum(["UPVOTE", "DOWNVOTE"]).nullable().optional(),
 		_count: z
 			.object({
 				comments: z.number(),
-				votes: z.number(),
 			})
 			.optional(),
 	})
@@ -116,9 +118,9 @@ export const postFeedResponseSchema = z
 
 export const postVotesDataSchema = z
 	.object({
-		upvotes: z.number(),
-		downvotes: z.number(),
-		score: z.number(),
+		upvoteCount: z.number().int(),
+		downvoteCount: z.number().int(),
+		score: z.number().int(),
 		currentUserVote: z.enum(["UPVOTE", "DOWNVOTE"]).nullable(),
 	})
 	.openapi("PostVotesData");

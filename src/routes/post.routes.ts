@@ -17,7 +17,9 @@ import { requireModerator } from "../middlewares/role.middleware.js";
 
 const router = express.Router();
 
-router.get("/", getActivePosts);
+// `optionalAuth` on the feed lets each row carry the caller's own vote when a
+// token is present, without closing the endpoint to anonymous readers.
+router.get("/", optionalAuth, getActivePosts);
 router.get("/search", handlePostSearch);
 router.get("/:id/votes", optionalAuth, getVotesData);
 router.get("/:id", getPost);

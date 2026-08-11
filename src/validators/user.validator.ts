@@ -62,6 +62,19 @@ export const userSearchSchema = z.object({
 		.pipe(z.number().int().min(1).max(50)),
 });
 
+export const userSearchResultItemSchema = z
+	.object({
+		id: z.uuid(),
+		username: z.string(),
+		_count: z.object({
+			following: z.number().int(),
+			followers: z.number().int(),
+			posts: z.number().int(),
+			ownedCommunities: z.number().int(),
+		}),
+	})
+	.openapi("UserSearchResultItem");
+
 export const compactUserSchema = z.object({
 	username: z.string(),
 });

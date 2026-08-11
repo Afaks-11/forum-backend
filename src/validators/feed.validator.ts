@@ -28,11 +28,14 @@ export const feedPostItemSchema = z.object({
 	isLocked: z.boolean(),
 	authorId: z.uuid(),
 	communityId: z.uuid(),
-	user: compactUserSchema,
+	author: compactUserSchema,
 	community: compactCommunitySchema,
+	upvoteCount: z.number().int(),
+	downvoteCount: z.number().int(),
+	score: z.number().int(),
+	currentUserVote: z.enum(["UPVOTE", "DOWNVOTE"]).nullable().optional(),
 	_count: z.object({
-		comment: z.number().int(),
-		votes: z.number().int(),
+		comments: z.number().int(),
 	}),
 });
 
