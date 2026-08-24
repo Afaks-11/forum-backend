@@ -17,8 +17,8 @@ const mockPostRepository = {
 	unsave: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateLockStatus: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updatePinStatus: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	getVoteMetrics: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	getUserVote: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findByIdWithViewerVote: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findViewerVotes: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	searchPosts: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
@@ -434,8 +434,8 @@ describe("Post Service Unit Test Suite", () => {
 	describe("getPostVoteMetrics", () => {
 		it("Happy Path (Cache Hit): should fetch vote counts from fast cache layers", async () => {
 			const scorePayload = {
-				upvotes: 10,
-				downvotes: 2,
+				upvoteCount: 10,
+				downvoteCount: 2,
 				score: 8,
 				currentUserVote: "UPVOTE",
 			};
@@ -449,34 +449,62 @@ describe("Post Service Unit Test Suite", () => {
 			expect(result).toEqual(scorePayload);
 		});
 
-		it("Happy Path (Cache Miss): should dynamically process total vote scores and check viewer preferences", async () => {
+		it("Happy Path (Cache Miss): should read stored counters and the viewer's own vote in a single query", async () => {
 			mockRedis.get.mockResolvedValue(null);
-			mockPrisma.post.findUnique.mockResolvedValue({
+			mockPostRepository.findByIdWithViewerVote.mockResolvedValue({
 				id: "post_123",
 				deletedAt: null,
+				upvoteCount: 10,
+				downvoteCount: 3,
+				score: 7,
+				votes: [{ type: "DOWNVOTE" }],
 			});
-			mockPostRepository.getVoteMetrics.mockResolvedValue({
-				upvotes: 10,
-				downvotes: 3,
-			});
-			mockPostRepository.getUserVote.mockResolvedValue({ type: "DOWNVOTE" });
 
 			const result = await getPostVoteMetrics("post_123", "usr_123");
 
-			expect(mockPostRepository.getVoteMetrics).toHaveBeenCalledWith(
-				"post_123",
-			);
-			expect(mockPostRepository.getUserVote).toHaveBeenCalledWith(
+			expect(mockPostRepository.findByIdWithViewerVote).toHaveBeenCalledWith(
 				"post_123",
 				"usr_123",
 			);
 			expect(mockRedis.set).toHaveBeenCalledWith(
 				"post:post_123:vote_metrics:usr_123",
-				{ upvotes: 10, downvotes: 3, score: 7, currentUserVote: "DOWNVOTE" },
+				{
+					upvoteCount: 10,
+					downvoteCount: 3,
+					score: 7,
+					currentUserVote: "DOWNVOTE",
+				},
 				60,
 			);
 			expect(result.score).toBe(7);
 			expect(result.currentUserVote).toBe("DOWNVOTE");
+		});
+
+		it("should report a null currentUserVote when the viewer has not voted", async () => {
+			mockRedis.get.mockResolvedValue(null);
+			mockPostRepository.findByIdWithViewerVote.mockResolvedValue({
+				id: "post_123",
+				deletedAt: null,
+				upvoteCount: 4,
+				downvoteCount: 1,
+				score: 3,
+				votes: [],
+			});
+
+			const result = await getPostVoteMetrics("post_123", "usr_123");
+
+			expect(result.currentUserVote).toBeNull();
+			expect(result.score).toBe(3);
+		});
+
+		it("should reject a missing post rather than reporting zeroed counters", async () => {
+			mockRedis.get.mockResolvedValue(null);
+			mockPostRepository.findByIdWithViewerVote.mockResolvedValue(null);
+
+			await expect(getPostVoteMetrics("post_404", "usr_123")).rejects.toThrow(
+				new AppError("Post not found", 404),
+			);
+			expect(mockRedis.set).not.toHaveBeenCalled();
 		});
 	});
 

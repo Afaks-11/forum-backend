@@ -29,7 +29,13 @@ describe("POST /api/v1/votes", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.success).toBe(true);
-			expect(res.body.data).toBe("CREATED");
+			expect(res.body.data).toEqual({
+				action: "CREATED",
+				score: 1,
+				upvoteCount: 1,
+				downvoteCount: 0,
+				currentUserVote: "UPVOTE",
+			});
 
 			const stored = await db.vote.findUnique({
 				where: { userId_postId: { userId: voter.id, postId } },
@@ -49,8 +55,8 @@ describe("POST /api/v1/votes", () => {
 				.set("Authorization", `Bearer ${voter.accessToken}`);
 
 			expect(res.status).toBe(200);
-			expect(res.body.data.upvotes).toBe(1);
-			expect(res.body.data.downvotes).toBe(0);
+			expect(res.body.data.upvoteCount).toBe(1);
+			expect(res.body.data.downvoteCount).toBe(0);
 			expect(res.body.data.score).toBe(1);
 			expect(res.body.data.currentUserVote).toBe("UPVOTE");
 		});
@@ -64,7 +70,13 @@ describe("POST /api/v1/votes", () => {
 			const res = await castVote(postId, voter.accessToken, "DOWNVOTE");
 
 			expect(res.status).toBe(200);
-			expect(res.body.data).toBe("CREATED");
+			expect(res.body.data).toEqual({
+				action: "CREATED",
+				score: -1,
+				upvoteCount: 0,
+				downvoteCount: 1,
+				currentUserVote: "DOWNVOTE",
+			});
 
 			const stored = await db.vote.findUnique({
 				where: { userId_postId: { userId: voter.id, postId } },
@@ -80,7 +92,15 @@ describe("POST /api/v1/votes", () => {
 			const res = await castVote(postId, voter.accessToken, "DOWNVOTE");
 
 			expect(res.status).toBe(200);
-			expect(res.body.data).toBe("CHANGED");
+			// Both counters move in the same step, so a flip swings the score by
+			// two rather than one.
+			expect(res.body.data).toEqual({
+				action: "CHANGED",
+				score: -1,
+				upvoteCount: 0,
+				downvoteCount: 1,
+				currentUserVote: "DOWNVOTE",
+			});
 
 			const votes = await db.vote.findMany({ where: { postId } });
 			expect(votes).toHaveLength(1);
@@ -97,7 +117,13 @@ describe("POST /api/v1/votes", () => {
 			const res = await castVote(postId, voter.accessToken, "UPVOTE");
 
 			expect(res.status).toBe(200);
-			expect(res.body.data).toBe("REMOVED");
+			expect(res.body.data).toEqual({
+				action: "REMOVED",
+				score: 0,
+				upvoteCount: 0,
+				downvoteCount: 0,
+				currentUserVote: null,
+			});
 
 			const stored = await db.vote.findUnique({
 				where: { userId_postId: { userId: voter.id, postId } },
@@ -132,11 +158,35 @@ describe("POST /api/v1/votes", () => {
 
 			const res = await supertest(app).get(`/api/v1/posts/${postId}/votes`);
 
-			expect(res.body.data.upvotes).toBe(1);
-			expect(res.body.data.downvotes).toBe(1);
+			expect(res.body.data.upvoteCount).toBe(1);
+			expect(res.body.data.downvoteCount).toBe(1);
 			expect(res.body.data.score).toBe(0);
 			// Anonymous readers have no vote of their own.
 			expect(res.body.data.currentUserVote).toBeNull();
+		});
+
+		it("keeps the stored counters in step with the vote rows", async () => {
+			const { postId } = await createUserWithPost(app);
+			const first = await createVerifiedUser(app);
+			const second = await createVerifiedUser(app);
+
+			await castVote(postId, first.accessToken, "UPVOTE");
+			await castVote(postId, second.accessToken, "UPVOTE");
+			await castVote(postId, second.accessToken, "DOWNVOTE");
+
+			const [post, votes] = await Promise.all([
+				db.post.findUniqueOrThrow({ where: { id: postId } }),
+				db.vote.findMany({ where: { postId } }),
+			]);
+
+			// The counters are denormalized, so the invariant worth guarding is that
+			// they still agree with the votes table they were derived from.
+			const upvotes = votes.filter((vote) => vote.type === "UPVOTE").length;
+			const downvotes = votes.filter((vote) => vote.type === "DOWNVOTE").length;
+
+			expect(post.upvoteCount).toBe(upvotes);
+			expect(post.downvoteCount).toBe(downvotes);
+			expect(post.score).toBe(upvotes - downvotes);
 		});
 	});
 
@@ -182,6 +232,24 @@ describe("POST /api/v1/votes", () => {
 
 			expect(res.status).toBe(400);
 			expect(res.body.success).toBe(false);
+		});
+
+		it("refuses to vote on a locked post", async () => {
+			const { postId } = await createUserWithPost(app);
+			const voter = await createVerifiedUser(app);
+
+			await db.post.update({
+				where: { id: postId },
+				data: { isLocked: true },
+			});
+
+			const res = await castVote(postId, voter.accessToken, "UPVOTE");
+
+			expect(res.status).toBe(403);
+			expect(res.body.success).toBe(false);
+
+			const votes = await db.vote.findMany({ where: { postId } });
+			expect(votes).toHaveLength(0);
 		});
 	});
 });

@@ -62,7 +62,7 @@ describe("GET /api/v1/posts (Home Feed)", () => {
 	it("should paginate with cursor", async () => {
 		const user = await createUser();
 		const community = await createCommunity(user.id, "PageTest", "pagetest");
-		const _post1 = await createPost(user.id, community.id, "First");
+		await createPost(user.id, community.id, "First");
 		await createPost(user.id, community.id, "Second");
 
 		const res1 = await request.get("/api/v1/posts?limit=1");

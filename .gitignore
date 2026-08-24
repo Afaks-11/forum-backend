@@ -21,3 +21,9 @@ build/
 
 # Report 
 ENGINEERING_REPORT.md
+REFACTOR-NOTES.md
+
+# Scratch typecheck config (tests/ is excluded from tsconfig.json)
+tsconfig.tests.tmp.json
+
+docs

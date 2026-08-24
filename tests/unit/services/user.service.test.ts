@@ -390,7 +390,18 @@ describe("User Service Unit Test Suite", () => {
 			mockUserRepository.searchUsers.mockReset();
 
 			mockRedis.get.mockResolvedValue(null);
-			const databaseHits = [{ id: "usr_20", username: "db_hit" }];
+			const databaseHits = [
+				{
+					id: "usr_20",
+					username: "db_hit",
+					_count: {
+						following: 12,
+						followers: 340,
+						posts: 57,
+						ownedCommunities: 2,
+					},
+				},
+			];
 			mockUserRepository.searchUsers.mockResolvedValue(databaseHits);
 
 			const result = await searchForUsers({ query: "Feynman", limit: 10 });

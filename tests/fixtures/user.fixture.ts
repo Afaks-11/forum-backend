@@ -11,10 +11,11 @@ export interface UserFixture {
 	lockUntil: Date | null;
 	passwordResetToken: string | null;
 	passwordResetExpires: Date | null;
-	// Named to match the Prisma column (`emailVerifyToken`), not the service-layer
-	// input field (`verificationToken`), because fixtures stand in for rows.
+	// Named to match the Prisma columns (`emailVerifyToken` /
+	// `emailVerifyTokenExpires`), not the service-layer input field
+	// (`verificationToken`), because fixtures stand in for rows.
 	emailVerifyToken: string | null;
-	verificationTokenExpires: Date | null;
+	emailVerifyTokenExpires: Date | null;
 	deletedAt: Date | null;
 	createdAt: Date;
 }
@@ -41,8 +42,8 @@ export const createFakeUser = (
 		lockUntil: null,
 		passwordResetToken: null,
 		passwordResetExpires: null,
-		verificationToken: "mock_verification_token",
-		verificationTokenExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+		emailVerifyToken: "mock_verification_token",
+		emailVerifyTokenExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
 		deletedAt: null,
 		createdAt: new Date("2026-01-01T00:00:00.000Z"),
 		...overrides,

@@ -35,16 +35,22 @@ export const getActivePosts = asyncHandler(
 	async (req: Request, res: Response) => {
 		const parsedQueries = postFeedQuerySchema.parse(req.query);
 		const limitValue = parseInt(parsedQueries.limit || "10", 10);
+		const viewerId = res.locals.user?.userId
+			? String(res.locals.user.userId)
+			: undefined;
 
-		const result = await getAdvancedPostsFeed({
-			sort: parsedQueries.sort,
-			...(parsedQueries.community
-				? { community: parsedQueries.community }
-				: {}),
-			...(parsedQueries.author ? { author: parsedQueries.author } : {}),
-			...(parsedQueries.cursor ? { cursor: parsedQueries.cursor } : {}),
-			limit: limitValue,
-		});
+		const result = await getAdvancedPostsFeed(
+			{
+				sort: parsedQueries.sort,
+				...(parsedQueries.community
+					? { community: parsedQueries.community }
+					: {}),
+				...(parsedQueries.author ? { author: parsedQueries.author } : {}),
+				...(parsedQueries.cursor ? { cursor: parsedQueries.cursor } : {}),
+				limit: limitValue,
+			},
+			viewerId,
+		);
 
 		res.status(200).json({
 			success: true,

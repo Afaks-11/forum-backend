@@ -61,6 +61,10 @@ import {
 	usernameParamSchema,
 	userProfileResponseSchema,
 } from "../validators/user.validator.js";
+import {
+	castVoteSchema,
+	voteResultSchema,
+} from "../validators/vote.validator.js";
 
 const registry = new OpenAPIRegistry();
 const communityTag = "Communities Management";
@@ -925,6 +929,46 @@ registry.registerPath({
 });
 
 registry.registerPath({
+	method: "post",
+	path: "/votes",
+	summary: "Cast, flip, or retract a vote on a post",
+	description:
+		"A single toggle endpoint. Sending the type already held retracts the vote, sending the opposite flips it, and sending one where none exists creates it. The post's stored tallies are updated in the same transaction and returned, so no follow-up read is needed to refresh the UI.",
+	tags: [postsTag],
+	security: [{ bearerAuth: [] }],
+	request: {
+		body: { content: { "application/json": { schema: castVoteSchema } } },
+	},
+	responses: {
+		200: {
+			description:
+				"Vote applied. Returns the branch taken alongside the post's refreshed tallies.",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: voteResultSchema,
+					}),
+					example: {
+						success: true,
+						data: {
+							action: "CREATED",
+							score: 89,
+							upvoteCount: 97,
+							downvoteCount: 8,
+							currentUserVote: "UPVOTE",
+						},
+					},
+				},
+			},
+		},
+		401: { description: "Missing or invalid access token." },
+		403: { description: "Voting is disabled on a locked post." },
+		404: { description: "Target post entity could not be found." },
+	},
+});
+
+registry.registerPath({
 	method: "get",
 	path: "/posts/{id}/votes",
 	summary: "Fetch aggregate upvote/downvote scores for a post",
@@ -944,9 +988,19 @@ registry.registerPath({
 						success: z.boolean(),
 						data: postVotesDataSchema,
 					}),
+					example: {
+						success: true,
+						data: {
+							upvoteCount: 97,
+							downvoteCount: 8,
+							score: 89,
+							currentUserVote: "UPVOTE",
+						},
+					},
 				},
 			},
 		},
+		404: { description: "Target post entity could not be found." },
 	},
 });
 
@@ -1052,9 +1106,13 @@ registry.registerPath({
 								isLocked: false,
 								authorId: "u83d6cb4-4bf8-4682-8bc7-e316d29df83e",
 								communityId: "c29dbb40-8f64-42b4-82ee-c1b1842813da",
-								user: { username: "dev_wizard" },
+								author: { username: "dev_wizard" },
 								community: { name: "TypeScript Core", slug: "typescript" },
-								_count: { comment: 14, votes: 89 },
+								upvoteCount: 97,
+								downvoteCount: 8,
+								score: 89,
+								currentUserVote: "UPVOTE",
+								_count: { comments: 14 },
 							},
 						],
 						meta: { nextCursor: "b1d5cda0-9f12-43c4-91fe-d1c1842813ec" },
@@ -1120,12 +1178,16 @@ registry.registerPath({
 								isLocked: false,
 								authorId: "u83d6cb4-4bf8-4682-8bc7-e316d29df83e",
 								communityId: "c29dbb40-8f64-42b4-82ee-c1b1842813da",
-								user: { username: "tc39_watcher" },
+								author: { username: "tc39_watcher" },
 								community: {
 									name: "JavaScript Engineering",
 									slug: "javascript",
 								},
-								_count: { comment: 142, votes: 912 },
+								upvoteCount: 1024,
+								downvoteCount: 112,
+								score: 912,
+								currentUserVote: null,
+								_count: { comments: 142 },
 							},
 						],
 						meta: { nextCursor: "20" },
@@ -1594,9 +1656,13 @@ registry.registerPath({
 								isLocked: false,
 								authorId: "u11d6cb4-4bf8-4682-8bc7-e316d29df11a",
 								communityId: "d83dbb40-8f64-42b4-82ee-c1b1842813cc",
-								user: { username: "systems_guru" },
+								author: { username: "systems_guru" },
 								community: { name: "Rust Systems Dev", slug: "rust-systems" },
-								_count: { comment: 32, votes: 147 },
+								upvoteCount: 163,
+								downvoteCount: 16,
+								score: 147,
+								currentUserVote: null,
+								_count: { comments: 32 },
 							},
 						],
 					},

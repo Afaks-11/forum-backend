@@ -88,16 +88,12 @@ describe("Authentication Integration Module", () => {
 			expect(response.body).toHaveProperty("success", true);
 
 			// Assert inside the data wrapper based on actual runtime contract response
-			const responseBody = response.body as Record<
-				string,
-				Record<string, unknown>
-			>;
-			expect(responseBody.data).toHaveProperty("accessToken");
-			expect(responseBody.data).toHaveProperty("user");
-			expect(responseBody.data.user).toHaveProperty(
-				"email",
-				registrationPayload.email,
-			);
+			const { data } = response.body as {
+				data: { accessToken: string; user: { email: string } };
+			};
+			expect(data).toHaveProperty("accessToken");
+			expect(data).toHaveProperty("user");
+			expect(data.user).toHaveProperty("email", registrationPayload.email);
 		});
 
 		it("should reject authentication requests with invalid credentials", async () => {
@@ -142,18 +138,11 @@ describe("Authentication Integration Module", () => {
 			expect(response.status).toBe(200);
 			expect(response.body).toHaveProperty("success", true);
 
-			const responseBody = response.body as Record<
-				string,
-				Record<string, Record<string, unknown>>
-			>;
-			expect(responseBody.data.userProfileDetails).toHaveProperty(
-				"id",
-				mockUserId,
-			);
-			expect(responseBody.data.userProfileDetails).toHaveProperty(
-				"email",
-				mockEmail,
-			);
+			const { data } = response.body as {
+				data: { userProfileDetails: { id: string; email: string } };
+			};
+			expect(data.userProfileDetails).toHaveProperty("id", mockUserId);
+			expect(data.userProfileDetails).toHaveProperty("email", mockEmail);
 		});
 
 		it("should deny access and return an unauthorized code if no token is passed", async () => {

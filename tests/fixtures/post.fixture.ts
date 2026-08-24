@@ -1,10 +1,13 @@
 import type { Post } from "../../src/generated/prisma/client.js";
+import { PostType } from "../../src/generated/prisma/enums.js";
 
 /**
- * Represents a Post entity along with its loaded relations and counts.
+ * Mirrors the shape returned by `postListInclude` in the post repository.
+ * Kept structurally identical so a drift in the repository's select surfaces
+ * here as a type error rather than as a silently passing test.
  */
 export type PostWithRelationsFixture = Post & {
-	user: {
+	author: {
 		username: string;
 	};
 	community: {
@@ -12,8 +15,7 @@ export type PostWithRelationsFixture = Post & {
 		slug: string;
 	};
 	_count: {
-		comment: number;
-		votes: number;
+		comments: number;
 	};
 };
 
@@ -29,7 +31,8 @@ export interface CommunityPayloadFixture {
 
 /**
  * Generates a post fixture complete with its sub-relation counts.
- * Keeps structural properties intact to preserve unit test stability.
+ * Vote tallies default to a consistent triple (score === up - down) so tests
+ * that assert on ordering are not built on impossible data.
  */
 export function createFakePost(
 	overrides: Partial<PostWithRelationsFixture> = {},
@@ -38,18 +41,24 @@ export function createFakePost(
 		id: "post_123",
 		title: "Mastering TypeScript Architecture",
 		content: "Deep dive into production-ready architecture patterns.",
+		type: PostType.TEXT,
 		authorId: "usr_123",
 		communityId: "cmnt_123",
 		isLocked: false,
 		isPinned: false,
+		upvoteCount: 50,
+		downvoteCount: 8,
+		score: 42,
+		hotScore: 0,
+		controversialScore: 0,
 		createdAt: new Date("2026-01-01T00:00:00.000Z"),
 		updatedAt: new Date("2026-01-01T00:00:00.000Z"),
 		deletedAt: null,
-		user: { username: "dev_architect" },
+		author: { username: "dev_architect" },
 		community: { name: "TypeScript", slug: "typescript" },
-		_count: { comment: 12, votes: 42 },
+		_count: { comments: 12 },
 		...overrides,
-	} as PostWithRelationsFixture;
+	};
 }
 
 /**

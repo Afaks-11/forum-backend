@@ -13,7 +13,7 @@ export function createFakeComment(overrides = {}) {
 		createdAt: new Date(),
 		updatedAt: new Date(),
 		deletedAt: null,
-		user: { id: "usr_123", username: "code_reviewer" },
+		author: { id: "usr_123", username: "code_reviewer" },
 		...overrides,
 	};
 }

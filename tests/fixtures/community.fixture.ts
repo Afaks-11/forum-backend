@@ -33,7 +33,8 @@ export function createFakeMembership(overrides: Partial<Membership> = {}) {
 		userId: "usr_123",
 		communityId: "cmnt_123",
 		role: MembershipRole.MEMBER,
-		joinedAt: new Date("2026-01-01T00:00:00.000Z"),
+		createdAt: new Date("2026-01-01T00:00:00.000Z"),
+		updatedAt: new Date("2026-01-01T00:00:00.000Z"),
 		...overrides,
 	};
 }

@@ -382,7 +382,7 @@ describe("Auth Service Unit Test Suite", () => {
 
 		it("verifyUserEmail: should reject a token whose expiry window has already elapsed", async () => {
 			const user = createFakeUser({
-				verificationTokenExpires: new Date(Date.now() - 1000),
+				emailVerifyTokenExpires: new Date(Date.now() - 1000),
 			});
 			mockUserRepository.findByVerifyToken.mockResolvedValue(user);
 
