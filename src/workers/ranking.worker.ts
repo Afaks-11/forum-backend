@@ -10,9 +10,12 @@ import { redis } from "../utils/redis.js";
 
 /**
  * Recomputes the global hot and controversial feed ZSETs on a schedule.
- * Scores are precomputed here rather than at read time because hot ranking
- * depends on vote totals that would otherwise require a sort over every post
- * on every feed request.
+ *
+ * Scores are precomputed here rather than at read time because ranking depends
+ * on vote totals that would otherwise require a sort over every post on every
+ * feed request. Tallies are read from the posts table's denormalized counters,
+ * so the whole pass costs one SELECT and one batched UPDATE regardless of how
+ * many posts are rescored.
  */
 export const rankingWorker = new Worker(
 	"ranking-cron-queue",
@@ -32,28 +35,36 @@ export const rankingWorker = new Worker(
 		const rawRedisClient = redis.getClient();
 		const pipeline = rawRedisClient.pipeline();
 
-		for (const post of recentPosts) {
-			const { upvotes, downvotes } = await postRepository.getVoteMetrics(
-				post.id,
+		const scores = recentPosts.map((post) => {
+			const hotScore = calculateHotScore(
+				post.upvoteCount,
+				post.downvoteCount,
+				post.createdAt,
 			);
-
-			const hotScore = calculateHotScore(upvotes, downvotes, post.createdAt);
 			const controversialScore = calculateControversialScore(
-				upvotes,
-				downvotes,
+				post.upvoteCount,
+				post.downvoteCount,
 			);
 
 			pipeline.zadd(globalHotKey, hotScore, post.id);
 			pipeline.zadd(globalControversialKey, controversialScore, post.id);
-		}
+
+			return { id: post.id, hotScore, controversialScore };
+		});
 
 		// Trim to the top 1,000 by rank; without this the ZSETs would accumulate
 		// every post ever ranked and grow without bound.
 		pipeline.zremrangebyrank(globalHotKey, 0, -1001);
 		pipeline.zremrangebyrank(globalControversialKey, 0, -1001);
 
-		await pipeline.exec();
-		logger.info("Dynamic feed rankings updated in Redis.");
+		// Persisted alongside Redis so the SQL feed fallback orders by the same
+		// scores the ZSETs hold instead of degrading to raw vote volume.
+		await Promise.all([
+			pipeline.exec(),
+			postRepository.updateRankingScores(scores),
+		]);
+
+		logger.info("Dynamic feed rankings updated in Redis and Postgres.");
 	},
 	{ connection: createQueueConnection() },
 );

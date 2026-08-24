@@ -1,8 +1,24 @@
-import type { Prisma, PrismaClient } from "../generated/prisma/client.js";
+import type { PrismaClient } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import type {
 	CreatePostInput,
 	updatePostInput,
 } from "../validators/post.validator.js";
+
+/**
+ * Shared shape for every list/detail read so the feed, search, and
+ * recommendation paths cannot drift apart. Vote tallies come from the
+ * denormalized scalar columns on `posts`, so only comments need aggregating.
+ */
+const postListInclude = {
+	author: { select: { username: true } },
+	community: { select: { name: true, slug: true } },
+	_count: { select: { comments: true } },
+} satisfies Prisma.PostInclude;
+
+export type PostListRow = Prisma.PostGetPayload<{
+	include: typeof postListInclude;
+}>;
 
 export class PostRepository {
 	constructor(private readonly prisma: PrismaClient) {}
@@ -20,18 +36,14 @@ export class PostRepository {
 	}
 
 	/**
-	 * Fetches an active post with author, community, and engagement counts.
+	 * Fetches an active post with author, community, and comment count.
 	 * Soft-deleted rows are filtered out, which is why this is `findFirst`
 	 * rather than `findUnique` despite the ID being unique.
 	 */
 	async findById(id: string) {
 		return await this.prisma.post.findFirst({
 			where: { id, deletedAt: null },
-			include: {
-				user: { select: { username: true } },
-				community: { select: { name: true, slug: true } },
-				_count: { select: { comment: true, votes: true } },
-			},
+			include: postListInclude,
 		});
 	}
 
@@ -42,6 +54,23 @@ export class PostRepository {
 	async findUniqueById(id: string) {
 		return await this.prisma.post.findUnique({
 			where: { id },
+		});
+	}
+
+	/**
+	 * Fetches a post together with the viewer's own vote in a single round trip.
+	 * The nested `votes` filter narrows to at most one row via the
+	 * `(userId, postId)` unique, so this replaces a separate vote lookup.
+	 */
+	async findByIdWithViewerVote(id: string, viewerId?: string) {
+		return await this.prisma.post.findFirst({
+			where: { id, deletedAt: null },
+			include: {
+				...postListInclude,
+				votes: viewerId
+					? { where: { userId: viewerId }, select: { type: true } }
+					: false,
+			},
 		});
 	}
 
@@ -59,23 +88,42 @@ export class PostRepository {
 				id: { in: ids },
 				deletedAt: null,
 			},
-			include: {
-				user: { select: { username: true } },
-				community: { select: { name: true, slug: true } },
-				_count: { select: { comment: true, votes: true } },
-			},
+			include: postListInclude,
 		});
 	}
 
 	/**
-	 * Feeds the ranking worker the newest active posts to rescore.
+	 * Feeds the ranking worker the newest active posts to rescore. Only the
+	 * columns the scoring functions read are selected.
 	 */
 	async findRecentActivePosts(limit: number) {
 		return await this.prisma.post.findMany({
 			where: { deletedAt: null },
 			take: limit,
 			orderBy: { createdAt: "desc" },
+			select: {
+				id: true,
+				createdAt: true,
+				upvoteCount: true,
+				downvoteCount: true,
+			},
 		});
+	}
+
+	/**
+	 * Resolves the viewer's vote for a page of posts in one query.
+	 * Returns a lookup keyed by post ID so callers can attach `currentUserVote`
+	 * without a per-row query.
+	 */
+	async findViewerVotes(postIds: string[], viewerId: string) {
+		if (postIds.length === 0) return new Map<string, "UPVOTE" | "DOWNVOTE">();
+
+		const votes = await this.prisma.vote.findMany({
+			where: { userId: viewerId, postId: { in: postIds } },
+			select: { postId: true, type: true },
+		});
+
+		return new Map(votes.map((vote) => [vote.postId, vote.type]));
 	}
 
 	async update(id: string, data: updatePostInput) {
@@ -143,23 +191,22 @@ export class PostRepository {
 			...(filters.community
 				? { community: { slug: filters.community.toLowerCase() } }
 				: {}),
-			...(filters.author ? { user: { username: filters.author } } : {}),
+			...(filters.author ? { author: { username: filters.author } } : {}),
 		};
 
-		//  Explicitly typed orderByClause supporting single objects or evaluation arrays
+		// Every sort resolves against a stored, indexed column. This path is the
+		// fallback used when the Redis ZSETs are unavailable, and it now ranks
+		// identically to them rather than approximating with raw vote volume.
 		let orderByClause:
 			| Prisma.PostOrderByWithRelationInput
-			| Prisma.PostOrderByWithRelationInput[] = {
-			createdAt: "desc",
-		};
+			| Prisma.PostOrderByWithRelationInput[] = { createdAt: "desc" };
 
-		// Hot and controversial fall back to a vote-count ordering here; their
-		// real scoring lives in the Redis ZSETs maintained by the ranking worker
-		// and is only reached when those sets are unavailable or filtered out.
 		if (filters.sort === "top") {
-			orderByClause = { votes: { _count: "desc" } };
-		} else if (filters.sort === "hot" || filters.sort === "controversial") {
-			orderByClause = [{ votes: { _count: "desc" } }, { createdAt: "desc" }];
+			orderByClause = [{ score: "desc" }, { createdAt: "desc" }];
+		} else if (filters.sort === "hot") {
+			orderByClause = [{ hotScore: "desc" }, { createdAt: "desc" }];
+		} else if (filters.sort === "controversial") {
+			orderByClause = [{ controversialScore: "desc" }, { createdAt: "desc" }];
 		}
 
 		const posts = await this.prisma.post.findMany({
@@ -167,12 +214,7 @@ export class PostRepository {
 			// One extra row is fetched purely to detect whether another page
 			// exists; it is popped below and never returned.
 			take: take + 1,
-			skip: filters.cursor ? 1 : 0,
-			include: {
-				user: { select: { username: true } },
-				community: { select: { name: true, slug: true } },
-				_count: { select: { comment: true, votes: true } },
-			},
+			include: postListInclude,
 			orderBy: orderByClause,
 			...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
 		});
@@ -184,23 +226,6 @@ export class PostRepository {
 		const nextCursor = hasNextPage && lastPost ? lastPost.id : null;
 
 		return { posts, nextCursor };
-	}
-
-	/**
-	 * Counts upvotes and downvotes in parallel, as neither depends on the other.
-	 */
-	async getVoteMetrics(postId: string) {
-		const [upvotes, downvotes] = await Promise.all([
-			this.prisma.vote.count({ where: { postId, type: "UPVOTE" } }),
-			this.prisma.vote.count({ where: { postId, type: "DOWNVOTE" } }),
-		]);
-		return { upvotes, downvotes };
-	}
-
-	async getUserVote(postId: string, userId: string) {
-		return await this.prisma.vote.findUnique({
-			where: { userId_postId: { userId, postId } },
-		});
 	}
 
 	/**
@@ -225,11 +250,7 @@ export class PostRepository {
 		const posts = await this.prisma.post.findMany({
 			where: whereClause,
 			take: take + 1,
-			include: {
-				user: { select: { username: true } },
-				community: { select: { name: true, slug: true } },
-				_count: { select: { comment: true, votes: true } },
-			},
+			include: postListInclude,
 			orderBy: { createdAt: "desc" },
 			...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
 		});
@@ -241,5 +262,33 @@ export class PostRepository {
 		const nextCursor = hasNextPage && lastPost ? lastPost.id : null;
 
 		return { posts, nextCursor };
+	}
+
+	/**
+	 * Writes a batch of freshly computed ranking scores in one statement.
+	 *
+	 * The ranking worker rescores up to a thousand posts per pass; issuing one
+	 * UPDATE each would dominate the job's runtime, so the batch is folded into
+	 * a single `UPDATE ... FROM (VALUES ...)`.
+	 */
+	async updateRankingScores(
+		scores: { id: string; hotScore: number; controversialScore: number }[],
+	) {
+		if (scores.length === 0) return 0;
+
+		const values = Prisma.join(
+			scores.map(
+				(row) =>
+					Prisma.sql`(${row.id}::uuid, ${row.hotScore}::double precision, ${row.controversialScore}::double precision)`,
+			),
+		);
+
+		return await this.prisma.$executeRaw`
+			UPDATE posts AS p
+			SET hot_score = v.hot_score,
+			    controversial_score = v.controversial_score
+			FROM (VALUES ${values}) AS v(id, hot_score, controversial_score)
+			WHERE p.id = v.id
+		`;
 	}
 }

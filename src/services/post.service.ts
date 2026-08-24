@@ -1,4 +1,5 @@
 import { AppError } from "../errors/AppError.js";
+import type { VoteType } from "../generated/prisma/client.js";
 import {
 	communityRepository,
 	postRepository,
@@ -22,11 +23,39 @@ type AdvancedFeedPayload = Awaited<
 type SearchPostsResult = Awaited<ReturnType<typeof postRepository.searchPosts>>;
 
 interface VoteMetricsPayload {
-	upvotes: number;
-	downvotes: number;
+	upvoteCount: number;
+	downvoteCount: number;
 	score: number;
-	currentUserVote: string | null;
+	currentUserVote: VoteType | null;
 }
+
+/**
+ * Resolves the caller's own vote for a page of posts in one query and folds it
+ * into each row.
+ *
+ * Feed pages are cached without viewer context so every reader shares one
+ * entry; the per-viewer field is layered on afterwards, on both the cache hit
+ * and miss paths. Doing it here rather than in the repository keeps the cached
+ * payload viewer-agnostic.
+ */
+const attachViewerVotes = async <T extends { id: string }>(
+	posts: T[],
+	viewerId?: string,
+): Promise<(T & { currentUserVote: VoteType | null })[]> => {
+	if (!viewerId || posts.length === 0) {
+		return posts.map((post) => ({ ...post, currentUserVote: null }));
+	}
+
+	const votes = await postRepository.findViewerVotes(
+		posts.map((post) => post.id),
+		viewerId,
+	);
+
+	return posts.map((post) => ({
+		...post,
+		currentUserVote: votes.get(post.id) ?? null,
+	}));
+};
 
 /**
  * Creates a post inside an existing community.
@@ -110,26 +139,34 @@ export const softDeletePost = async (postId: string, userId: string) => {
 
 /**
  * Cursor-paginated feed with sort and filter support, cached for five minutes.
+ * The cached page is viewer-agnostic; the caller's own vote is attached after
+ * the cache lookup so one entry serves every reader.
  */
-export const getAdvancedPostsFeed = async (filters: {
-	sort?: "new" | "top" | "hot" | "controversial";
-	community?: string;
-	author?: string;
-	cursor?: string;
-	limit?: number;
-}) => {
+export const getAdvancedPostsFeed = async (
+	filters: {
+		sort?: "new" | "top" | "hot" | "controversial";
+		community?: string;
+		author?: string;
+		cursor?: string;
+		limit?: number;
+	},
+	viewerId?: string,
+) => {
 	// The filter set is hashed into the key so each sort/community/cursor
 	// combination caches independently instead of overwriting one another.
 	const filterHash = Buffer.from(JSON.stringify(filters)).toString("base64");
 	const cacheKey = `feed:advanced:${filterHash}`;
 
-	const cachedFeed = await redis.get<AdvancedFeedPayload>(cacheKey);
-	if (cachedFeed) return cachedFeed;
+	let feed = await redis.get<AdvancedFeedPayload>(cacheKey);
+	if (!feed) {
+		feed = await postRepository.getAdvancedFeed(filters);
+		await redis.set(cacheKey, feed, 300);
+	}
 
-	const feed = await postRepository.getAdvancedFeed(filters);
-	await redis.set(cacheKey, feed, 300);
-
-	return feed;
+	return {
+		...feed,
+		posts: await attachViewerVotes(feed.posts, viewerId),
+	};
 };
 
 /**
@@ -222,6 +259,9 @@ export const modifyPostModerationState = async (
 /**
  * Returns a post's vote tally plus the caller's own vote.
  *
+ * Tallies are read straight off the post's denormalized columns, and the
+ * viewer's vote arrives on the same row, so this is a single query.
+ *
  * Cached per viewer, because `currentUserVote` varies by authentication state —
  * a shared entry would leak one user's vote to everyone else. Invalidation
  * therefore has to sweep the whole `post:<id>:vote_metrics:*` family.
@@ -229,33 +269,23 @@ export const modifyPostModerationState = async (
 export const getPostVoteMetrics = async (
 	postId: string,
 	currentUserId?: string,
-) => {
-	const viewerContext = currentUserId;
-	const cacheKey = `post:${postId}:vote_metrics:${viewerContext}`;
+): Promise<VoteMetricsPayload> => {
+	const cacheKey = `post:${postId}:vote_metrics:${currentUserId}`;
 
 	const cachedMetrics = await redis.get<VoteMetricsPayload>(cacheKey);
 	if (cachedMetrics) return cachedMetrics;
 
-	const post = await prisma.post.findUnique({
-		where: { id: postId, deletedAt: null },
-	});
+	const post = await postRepository.findByIdWithViewerVote(
+		postId,
+		currentUserId,
+	);
 	if (!post) throw new AppError("Post not found", 404);
 
-	const { upvotes, downvotes } = await postRepository.getVoteMetrics(postId);
-
-	let userVoteState: string | null = null;
-	if (currentUserId) {
-		const activeVote = await postRepository.getUserVote(postId, currentUserId);
-		if (activeVote) {
-			userVoteState = activeVote.type;
-		}
-	}
-
 	const metricsPayload: VoteMetricsPayload = {
-		upvotes,
-		downvotes,
-		score: upvotes - downvotes,
-		currentUserVote: userVoteState,
+		upvoteCount: post.upvoteCount,
+		downvoteCount: post.downvoteCount,
+		score: post.score,
+		currentUserVote: post.votes?.[0]?.type ?? null,
 	};
 
 	await redis.set(cacheKey, metricsPayload, 60);
