@@ -16,7 +16,6 @@ export const env = {
 		apiKey: getEnvOrThrow("CLOUDINARY_API_KEY"),
 		apiSecret: getEnvOrThrow("CLOUDINARY_API_SECRET"),
 	},
-
 	app: {
 		nodeEnv: process.env.NODE_ENV ?? "development",
 		port: parseInt(process.env.PORT ?? "3000", 10),
@@ -27,7 +26,6 @@ export const env = {
 			.map((origin) => origin.trim())
 			.filter(Boolean),
 	},
-
 	redis: {
 		url: getEnvOrThrow("REDIS_URL"),
 	},
@@ -46,5 +44,8 @@ export const env = {
 		smtp_user: getEnvOrThrow("SMTP_USER"),
 		smtp_pass: getEnvOrThrow("SMTP_PASS"),
 		smtp_from: getEnvOrThrow("SMTP_FROM"),
+	},
+	admin: {
+		adminRegistrationSecret: getEnvOrThrow("ADMIN_REGISTRATION_SECRET"),
 	},
 } as const;
