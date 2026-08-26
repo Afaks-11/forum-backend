@@ -154,6 +154,31 @@ export const postSearchSchema = z.object({
 	cursor: z.string().optional(),
 });
 
+export const lockModerationBodySchema = z
+	.object({
+		isLocked: z.boolean().optional(),
+	})
+	.strict();
+
+export const pinModerationBodySchema = z
+	.object({
+		isPinned: z.boolean(),
+	})
+	.strict();
+
+export const reportModerationBodySchema = z
+	.object({
+		reason: z
+			.string()
+			.trim()
+			.min(1, "Report reason cannot be empty")
+			.max(1000, "Report reason is too long")
+			.optional(),
+	})
+	.strict();
+
+export const hideModerationBodySchema = z.object({}).strict();
+
 export type PostSearchInput = z.infer<typeof postSearchSchema>;
 export type CreatePostInput = z.infer<typeof createPostSchema>;
 export type PostIdParamInput = z.infer<typeof postIdParamSchema>;

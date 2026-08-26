@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client.js";
+import type { PrismaClient, SystemRole } from "../generated/prisma/client.js";
 import type {
 	RegisterInput,
 	UpdateMeInput,
@@ -23,6 +23,7 @@ export class UserRepository {
 	 */
 	async create(
 		data: RegisterInput & {
+			role: SystemRole;
 			passwordHash: string;
 			verificationToken: string;
 			emailVerifyTokenExpires: Date;
@@ -33,6 +34,7 @@ export class UserRepository {
 				username: data.username,
 				email: data.email,
 				password: data.passwordHash,
+				role: data.role,
 				emailVerifyToken: data.verificationToken,
 				emailVerifyTokenExpires: data.emailVerifyTokenExpires,
 			},
@@ -40,6 +42,7 @@ export class UserRepository {
 				id: true,
 				username: true,
 				email: true,
+				role: true,
 				createdAt: true,
 			},
 		});

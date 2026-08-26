@@ -5,6 +5,7 @@ import {
 	getAdvancedPostsFeed,
 	getPostById,
 	getPostVoteMetrics,
+	type ModerationAction,
 	modifyPostModerationState,
 	savePostAction,
 	searchForPosts,
@@ -13,10 +14,14 @@ import {
 } from "../services/post.service.js";
 import {
 	createPostSchema,
+	hideModerationBodySchema,
+	lockModerationBodySchema,
+	pinModerationBodySchema,
 	postFeedQuerySchema,
 	postIdParamSchema,
 	postSearchSchema,
 	postVoteParamSchema,
+	reportModerationBodySchema,
 	updatePostSchema,
 } from "../validators/post.validator.js";
 
@@ -115,16 +120,51 @@ export const toggleModerationFlag = (
 		const userId = res.locals.user.userId;
 
 		const body = req.body ?? {};
-		const reasonText = body.reason ? String(body.reason) : undefined;
-		const { isLocked, isPinned } = body;
-		await modifyPostModerationState(
-			id,
-			userId,
-			actionType,
-			isLocked,
-			isPinned,
-			reasonText,
-		);
+		let action: ModerationAction;
+
+		switch (actionType) {
+			case "LOCK": {
+				const parsed = lockModerationBodySchema.parse(body);
+
+				action = {
+					action: "LOCK",
+					isLocked: parsed.isLocked,
+				};
+				break;
+			}
+
+			case "PIN": {
+				const parsed = pinModerationBodySchema.parse(body);
+
+				action = {
+					action: "PIN",
+					isPinned: parsed.isPinned,
+				};
+
+				break;
+			}
+
+			case "REPORT": {
+				const parsed = reportModerationBodySchema.parse(body);
+				action = {
+					action: "REPORT",
+					reason: parsed.reason,
+				};
+				break;
+			}
+
+			case "HIDE": {
+				hideModerationBodySchema.parse(body);
+
+				action = {
+					action: "HIDE",
+				};
+
+				break;
+			}
+		}
+		await modifyPostModerationState(id, userId, action);
+
 		res.status(200).json({
 			success: true,
 			message: `Operation ${actionType} completed successfully`,

@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.config.js";
 import { AppError } from "../errors/AppError.js";
+import { SystemRole } from "../generated/prisma/enums.js";
 import { emailQueue } from "../queues/email.queue.js";
 import {
 	tokenBlacklistRepository,
@@ -30,6 +31,21 @@ export const registerUser = async (data: RegisterInput) => {
 		throw new AppError("Username or email already taken", 409);
 	}
 
+	let assignedRole: SystemRole = SystemRole.USER;
+
+	const adminSecretEnv = env.admin.adminRegistrationSecret;
+	if (data.adminSecret && adminSecretEnv) {
+		const providedBuffer = Buffer.from(data.adminSecret);
+		const envBuffer = Buffer.from(adminSecretEnv);
+
+		if (
+			providedBuffer.length === envBuffer.length &&
+			crypto.timingSafeEqual(providedBuffer, envBuffer)
+		) {
+			assignedRole = SystemRole.ADMIN;
+		}
+	}
+
 	const salt = await bcrypt.genSalt(10);
 	const hashedPassword = await bcrypt.hash(data.password, salt);
 	const verificationToken = crypto.randomBytes(32).toString("hex");
@@ -37,6 +53,7 @@ export const registerUser = async (data: RegisterInput) => {
 
 	const newUser = await userRepository.create({
 		...data,
+		role: assignedRole,
 		passwordHash: hashedPassword,
 		verificationToken,
 		emailVerifyTokenExpires,

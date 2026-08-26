@@ -18,6 +18,11 @@ export const registerSchema = z
 			),
 		email: z.email("Invalid email format"),
 		password: z.string().min(8, "Password must be atleast 8 characters long"),
+		adminSecret: z.string().optional().openapi({
+			description: "You can use this secret for testing admin registration.",
+			example:
+				"ee4ab94c5774f99ba3b0c71b3ad0c1c1031fd121538ab094962b9a2d5a7a6030", // This will auto-fill in the Swagger UI
+		}),
 	})
 	.openapi("RegisterInput");
 

@@ -19,9 +19,21 @@ type PostPayload = NonNullable<
 type AdvancedFeedPayload = Awaited<
 	ReturnType<typeof postRepository.getAdvancedFeed>
 >;
-
 type SearchPostsResult = Awaited<ReturnType<typeof postRepository.searchPosts>>;
 
+export type ModerationAction =
+	| {
+			action: "LOCK";
+			isLocked: boolean | undefined;
+	  }
+	| { action: "PIN"; isPinned: boolean }
+	| {
+			action: "REPORT";
+			reason: string | undefined;
+	  }
+	| {
+			action: "HIDE";
+	  };
 interface VoteMetricsPayload {
 	upvoteCount: number;
 	downvoteCount: number;
@@ -195,38 +207,68 @@ export const savePostAction = async (
 export const modifyPostModerationState = async (
 	postId: string,
 	userId: string,
-	action: "PIN" | "LOCK" | "HIDE" | "REPORT",
-	isLocked: boolean,
-	isPinned: boolean,
-	reasonText?: string,
+	action: ModerationAction,
 ) => {
 	const post = await postRepository.findUniqueById(postId);
 	if (!post || post.deletedAt) throw new AppError("Post not found", 404);
 
-	switch (action) {
+	switch (action.action) {
 		case "LOCK": {
 			const caller = await prisma.user.findUnique({
 				where: { id: userId },
 				select: { role: true },
 			});
+
 			const isModOrAdmin =
 				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
-			if (post.authorId !== userId && !isModOrAdmin) {
+
+			const isAuthor = post.authorId === userId;
+			if (!isAuthor && !isModOrAdmin) {
 				throw new AppError("Forbidden: insufficient privileges", 403);
 			}
-			const updated = await postRepository.updateLockStatus(postId, isLocked);
+
+			let nextIsLocked: boolean;
+			let lockSetById: string | null;
+
+			if (isModOrAdmin) {
+				if (action.isLocked === undefined) {
+					throw new AppError("Staff must specify isLocked", 400);
+				}
+
+				nextIsLocked = action.isLocked;
+				lockSetById = nextIsLocked ? userId : null;
+			} else {
+				if (action.isLocked === false && post.lockSetById !== userId) {
+					throw new AppError(
+						"Forbidden: you cannot unlock a moderator lock",
+						403,
+					);
+				}
+
+				nextIsLocked = action.isLocked ?? true;
+				lockSetById = nextIsLocked ? userId : null;
+			}
+
+			const updated = await postRepository.updateLockStatus(
+				postId,
+				nextIsLocked,
+				lockSetById,
+			);
 
 			await redis.del(`post:${postId}`);
 			await redis.delPattern("feed:advanced:*");
 
-			await sendInternalNotification({
-				recipientId: post.authorId,
-				senderId: userId,
-				type: "MOD_ACTION",
-				title: "Your post has been locked",
-				content: `A moderator locked your post: "${post.title}". New comments are disabled.`,
-				link: `/posts/${postId}`,
-			});
+			if (nextIsLocked && isModOrAdmin) {
+				await sendInternalNotification({
+					recipientId: post.authorId,
+					senderId: userId,
+					type: "MOD_ACTION",
+					title: "Your post has been locked",
+					content: `A moderator locked your post: "${post.title}". New comments are disabled.`,
+					link: `/posts/${postId}`,
+				});
+			}
+
 			return updated;
 		}
 
@@ -240,14 +282,17 @@ export const modifyPostModerationState = async (
 			if (!isModOrAdmin) {
 				throw new AppError("Forbidden: Moderator privileges required", 403);
 			}
-			const updated = await postRepository.updatePinStatus(postId, isPinned);
+			const updated = await postRepository.updatePinStatus(
+				postId,
+				action.isPinned,
+			);
 			await redis.del(`post:${postId}`);
 			await redis.delPattern("feed:advanced:*");
 			return updated;
 		}
 
 		case "REPORT":
-			return await reportRepository.create(postId, userId, reasonText);
+			return await reportRepository.create(postId, userId, action.reason);
 
 		case "HIDE":
 			// Hiding is a per-viewer preference held client-side; there is no

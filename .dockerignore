@@ -1,6 +1,7 @@
 # Node
 node_modules
 dist 
+coverage
 
 
 # Version Control
@@ -17,3 +18,5 @@ dist
 
 # testing 
 *.test.ts 
+
+*.log

@@ -160,10 +160,14 @@ export class PostRepository {
 		});
 	}
 
-	async updateLockStatus(id: string, isLocked: boolean) {
+	async updateLockStatus(
+		id: string,
+		isLocked: boolean,
+		lockSetById: string | null,
+	) {
 		return await this.prisma.post.update({
 			where: { id },
-			data: { isLocked },
+			data: { isLocked, lockSetById },
 		});
 	}
 
@@ -279,7 +283,7 @@ export class PostRepository {
 		const values = Prisma.join(
 			scores.map(
 				(row) =>
-					Prisma.sql`(${row.id}::uuid, ${row.hotScore}::double precision, ${row.controversialScore}::double precision)`,
+					Prisma.sql`(${row.id}::text, ${row.hotScore}::double precision, ${row.controversialScore}::double precision)`,
 			),
 		);
 
