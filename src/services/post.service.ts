@@ -212,16 +212,31 @@ export const modifyPostModerationState = async (
 	const post = await postRepository.findUniqueById(postId);
 	if (!post || post.deletedAt) throw new AppError("Post not found", 404);
 
+	const caller = await prisma.user.findUnique({
+		where: { id: userId },
+		select: { role: true },
+	});
+
+	const isAdmin = caller?.role === "ADMIN";
+
+	let isCommunityMod = false;
+	if (post.communityId) {
+		const membership = await prisma.membership.findUnique({
+			where: {
+				userId_communityId: {
+					userId: userId,
+					communityId: post.communityId,
+				},
+			},
+			select: { role: true },
+		});
+		isCommunityMod = membership?.role === "MODERATOR";
+	}
+
+	const isModOrAdmin = isAdmin || isCommunityMod;
+
 	switch (action.action) {
 		case "LOCK": {
-			const caller = await prisma.user.findUnique({
-				where: { id: userId },
-				select: { role: true },
-			});
-
-			const isModOrAdmin =
-				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
-
 			const isAuthor = post.authorId === userId;
 			if (!isAuthor && !isModOrAdmin) {
 				throw new AppError("Forbidden: insufficient privileges", 403);
@@ -273,12 +288,6 @@ export const modifyPostModerationState = async (
 		}
 
 		case "PIN": {
-			const caller = await prisma.user.findUnique({
-				where: { id: userId },
-				select: { role: true },
-			});
-			const isModOrAdmin =
-				caller?.role === "MODERATOR" || caller?.role === "ADMIN";
 			if (!isModOrAdmin) {
 				throw new AppError("Forbidden: Moderator privileges required", 403);
 			}
