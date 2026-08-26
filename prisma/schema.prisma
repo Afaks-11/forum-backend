@@ -20,7 +20,6 @@ datasource db {
 
 enum SystemRole {
   USER
-  MODERATOR
   ADMIN
 }
 
@@ -70,6 +69,7 @@ model User {
   deletedAt DateTime? @map("deleted_at")
 
   posts             Post[]
+  lockedPosts Post[] @relation("PostLocks")
   ownedCommunities  Community[]     @relation("CommunityOwner")
   memberships       Membership[]
   comments          Comment[]
@@ -103,11 +103,13 @@ model Community {
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   posts   Post[]
   members Membership[]
 
   @@index([creatorId])
+  @@index([deletedAt])
   @@map("communities")
 }
 
@@ -117,7 +119,7 @@ model Membership {
   userId String @map("user_id")
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  communityId String    @map("community_id")
+  communityId String   @map("community_id")
   community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
 
   role MembershipRole @default(MEMBER)
@@ -139,6 +141,9 @@ model Post {
   isPinned Boolean @default(false) @map("is_pinned")
   isLocked Boolean @default(false) @map("is_locked")
 
+  lockSetById String? @map("lock_set_by_id")
+  lockSetBy User? @relation("PostLocks", fields: [lockSetById], references: [id], onDelete: SetNull)
+
   // Denormalized vote tallies. The votes table stays the source of truth; these
   // are maintained transactionally alongside every vote write so feed queries
   // never have to aggregate.
@@ -154,8 +159,8 @@ model Post {
   authorId String @map("author_id")
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
-  communityId String    @map("community_id")
-  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  communityId String?    @map("community_id")
+  community   Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
 
   comments Comment[]
   votes    Vote[]

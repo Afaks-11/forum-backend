@@ -13,7 +13,7 @@ type CommunityPayload = NonNullable<
 	Awaited<ReturnType<typeof communityRepository.findBySlug>>
 >;
 type CommunityListPayload = Awaited<
-	ReturnType<typeof communityRepository.findAllWithMemberCount>
+	ReturnType<typeof communityRepository.findAllCommunitiesWithMemberCount>
 >;
 type CommunityFeedPayload = Awaited<
 	ReturnType<typeof communityRepository.findPostsByCommunityId>
@@ -79,7 +79,7 @@ export const getAllCommunitiesList = async () => {
 	const cachedList = await redis.get<CommunityListPayload>(cacheKey);
 	if (cachedList) return cachedList;
 
-	const list = await communityRepository.findAllWithMemberCount();
+	const list = await communityRepository.findAllCommunitiesWithMemberCount();
 	await redis.set(cacheKey, list, 1800);
 	return list;
 };
@@ -105,8 +105,61 @@ export const joinCommunityAction = async (userId: string, slug: string) => {
 	await redis.del("communities:list");
 };
 
-export const leaveCommunityAction = async (userId: string, slug: string) => {
+export const leaveCommunityAction = async (
+	userId: string,
+	slug: string,
+	replacementUserId?: string | null,
+) => {
 	const group = await getCommunityBySlug(slug);
+	if (!group) {
+		throw new AppError("Community not found", 404);
+	}
+
+	const membership = await communityRepository.findMembership(userId, group.id);
+	if (!membership) {
+		throw new AppError("This user is not a member of this community", 404);
+	}
+
+	if (membership.role === MembershipRole.MODERATOR) {
+		const moderatorCount = await communityRepository.countModerators(group.id);
+
+		if (moderatorCount <= 1) {
+			const membersCount = await communityRepository.getMembersCount(group.id);
+
+			if (membersCount <= 1) {
+				await communityRepository.softDelete(group.id);
+				await redis.del(`community:slug:${slug}`);
+				await redis.del("communities:list");
+				return;
+			}
+
+			let nextModeratorId = replacementUserId;
+
+			if (!nextModeratorId || nextModeratorId === userId) {
+				const members = await communityRepository.findMembershipsByCommunityId(
+					group.id,
+					"MEMBER",
+				);
+				const eligibleMembers = members.filter((m) => m.userId !== userId);
+
+				if (eligibleMembers.length > 0) {
+					const randomIndex = Math.floor(
+						Math.random() * eligibleMembers.length,
+					);
+					nextModeratorId = eligibleMembers[randomIndex]?.userId;
+				}
+			}
+
+			if (nextModeratorId) {
+				await communityRepository.updateMembershipRole(
+					group.id,
+					nextModeratorId,
+					MembershipRole.MODERATOR,
+				);
+			}
+		}
+	}
+
 	await communityRepository.deleteMembership(userId, group.id);
 
 	await redis.del(`community:slug:${slug}`);
@@ -196,12 +249,33 @@ export const updateCommunityMediaAsset = async (
  */
 export const deleteCommunityAction = async (slug: string, userId: string) => {
 	const group = await getCommunityBySlug(slug);
-	if (group.creatorId !== userId)
+	if (!group) {
+		throw new AppError("Community not found", 404);
+	}
+
+	if (group.creatorId !== userId) {
 		throw new AppError(
 			"Only the original creator can delete this community",
 			403,
 		);
-	await communityRepository.delete(group.id);
+	}
+
+	const communityPosts = await communityRepository.findPostsByCommunityId(
+		group.id,
+	);
+
+	await communityRepository.softDelete(group.id);
+
+	const keysToEvict = [
+		`community:slug:${slug}`,
+		"communities:list",
+		`feed:community:${slug}`,
+		...communityPosts.map((post) => `post:${post.id}`),
+	];
+
+	if (keysToEvict.length > 0) {
+		await redis.del(keysToEvict);
+	}
 
 	await redis.del(`community:slug:${slug}`);
 	await redis.del("communities:list");

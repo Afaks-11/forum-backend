@@ -37,6 +37,7 @@ export const cronWorker = new Worker<CronJobData>(
 				);
 				break;
 			}
+
 			case "HARD_PURGE_DELETED_POSTS": {
 				const thirtyDaysAgo = new Date();
 				thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -57,6 +58,25 @@ export const cronWorker = new Worker<CronJobData>(
 					`[Cron Worker] Hard-purged soft-deleted posts older than 30 days.`,
 				);
 				break;
+			}
+
+			case "HARD_PURGE_DELETED_COMMUNITIES": {
+				const thirtyDaysAgo = new Date();
+				thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+				const result = await prisma.community.deleteMany({
+					where: {
+						deletedAt: {
+							not: null,
+							lt: thirtyDaysAgo,
+						},
+					},
+				});
+
+				logger.info(
+					{ purgedCount: result.count },
+					`[Cron Worker] Hard-purged soft-deleted communities older than 30 days.`,
+				);
 			}
 		}
 	},

@@ -67,7 +67,7 @@ export class CommunityRepository {
 	/**
 	 * Fetch list of all communities with aggregated membership counters
 	 */
-	async findAllWithMemberCount() {
+	async findAllCommunitiesWithMemberCount() {
 		return await this.prisma.community.findMany({
 			include: { _count: { select: { members: true } } },
 		});
@@ -182,9 +182,10 @@ export class CommunityRepository {
 	/**
 	 * Delete a community space permanently
 	 */
-	async delete(communityId: string) {
-		return await this.prisma.community.delete({
+	async softDelete(communityId: string) {
+		return await this.prisma.community.update({
 			where: { id: communityId },
+			data: { deletedAt: new Date() },
 		});
 	}
 
@@ -243,6 +244,17 @@ export class CommunityRepository {
 				id: true,
 				name: true,
 				slug: true,
+			},
+		});
+	}
+
+	/**
+	 * Fetch the number of users in a community
+	 */
+	async getMembersCount(id: string) {
+		return await this.prisma.membership.count({
+			where: {
+				communityId: id,
 			},
 		});
 	}

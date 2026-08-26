@@ -111,9 +111,9 @@ class RedisService {
 	/**
 	 * Delete a key from cache (Invalidation)
 	 */
-	async del(key: string): Promise<void> {
+	async del(key: string | string[]): Promise<void> {
 		try {
-			await this.client.del(key);
+			await this.client.del(...key);
 		} catch (error) {
 			logger.error(
 				{ err: error, cachekey: key },
