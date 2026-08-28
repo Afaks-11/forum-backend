@@ -26,9 +26,29 @@ const initMailer = async (): Promise<Transporter> => {
 };
 
 /**
- * Sends a transactional email.
- * Delivery failures are logged but never thrown: callers run inside queue
- * workers where an unhandled rejection would fail the whole job.
+ * Reduces an address to `a***@example.com` for logging.
+ *
+ * Recipient addresses are PII and end up in whatever aggregates the logs; the
+ * domain and first character are enough to debug a delivery problem.
+ */
+export const maskEmail = (address: string): string => {
+	const separator = address.lastIndexOf("@");
+	if (separator <= 0) return "***";
+
+	const local = address.slice(0, separator);
+	const domain = address.slice(separator);
+	return `${local.slice(0, 1)}***${domain}`;
+};
+
+/**
+ * Sends a transactional email, throwing when delivery fails.
+ *
+ * Swallowing SMTP errors here (the previous behaviour) reported every
+ * undeliverable password-reset mail as a completed job, which made BullMQ's
+ * three configured retries unreachable and inflated the `completed` metric with
+ * mail that never left the building. Rejecting instead lets transient blips
+ * genuinely retry and lands permanent failures in the retained failed set,
+ * where Bull Board can surface them.
  */
 export const sendSystemEmail = async (
 	to: string,
@@ -46,10 +66,14 @@ export const sendSystemEmail = async (
 		});
 
 		logger.info(
-			{ messagedId: info.messagedId, recipient: to },
+			{ messageId: info.messageId, recipient: maskEmail(to) },
 			"Email sent successfully.",
 		);
 	} catch (error) {
-		logger.error({ err: error }, "Critical: Failed to deliver email alert:");
+		logger.error(
+			{ err: error, recipient: maskEmail(to) },
+			"Failed to deliver email; the job will be retried.",
+		);
+		throw error;
 	}
 };

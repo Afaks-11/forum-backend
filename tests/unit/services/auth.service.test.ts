@@ -31,16 +31,14 @@ const mockTokenBlacklistRepository = {
 	blacklist: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
-const mockEmailQueue = {
-	add: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-};
+const mockEnqueueSystemEmail = jest.fn<(...args: unknown[]) => Promise<void>>();
 
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	userRepository: mockUserRepository,
 	tokenBlacklistRepository: mockTokenBlacklistRepository,
 }));
 await jest.unstable_mockModule("../../../src/queues/email.queue.js", () => ({
-	emailQueue: mockEmailQueue,
+	enqueueSystemEmail: mockEnqueueSystemEmail,
 }));
 
 // Import service layer target after mock setup
@@ -66,7 +64,7 @@ describe("Auth Service Unit Test Suite", () => {
 	// The service chains `.catch()` onto that call for fire-and-forget notices,
 	// which throws on `undefined`. Re-arm the queue stub for every test.
 	beforeEach(() => {
-		mockEmailQueue.add.mockResolvedValue(undefined);
+		mockEnqueueSystemEmail.mockResolvedValue(undefined);
 	});
 
 	// REGISTER USER TESTS
@@ -94,7 +92,7 @@ describe("Auth Service Unit Test Suite", () => {
 				registerInput.username,
 			);
 			expect(result).toEqual(mockSavedUser);
-			expect(mockEmailQueue.add).toHaveBeenCalled();
+			expect(mockEnqueueSystemEmail).toHaveBeenCalled();
 		});
 
 		it("Business Rule: should throw 409 AppError if user email or username exists", async () => {
@@ -168,6 +166,29 @@ describe("Auth Service Unit Test Suite", () => {
 			).rejects.toThrow(expect.objectContaining({ statusCode: 423 }));
 		});
 
+		it("Account Lockout: should reset an expired window before evaluating the next password", async () => {
+			const expired = createFakeUser({
+				lockUntil: new Date(Date.now() - 1000),
+				loginAttempts: 5,
+				isEmailVerified: true,
+			});
+			mockUserRepository.findByEmail.mockResolvedValue(expired);
+			mockUserRepository.updateLoginLockState.mockResolvedValue({
+				...expired,
+				lockUntil: null,
+				loginAttempts: 0,
+			});
+			jest.spyOn(bcrypt, "compare").mockResolvedValue(true as never);
+
+			await loginUser({ email: expired.email, password: "valid-password" });
+
+			expect(mockUserRepository.updateLoginLockState).toHaveBeenNthCalledWith(
+				1,
+				expired.id,
+				{ loginAttempts: 0, lockUntil: null },
+			);
+		});
+
 		it("Concurrency Fix: should invoke atomic increments directly inside DB on login failure", async () => {
 			const fakeUser = createFakeUser();
 			mockUserRepository.findByEmail.mockResolvedValue(fakeUser);
@@ -187,7 +208,7 @@ describe("Auth Service Unit Test Suite", () => {
 			expect(
 				mockUserRepository.incrementLoginAttemptsAtomic,
 			).toHaveBeenCalledWith(fakeUser.id);
-			expect(mockEmailQueue.add).toHaveBeenCalledWith(
+			expect(mockEnqueueSystemEmail).toHaveBeenCalledWith(
 				expect.stringContaining("login-attempt-failed:"),
 				expect.any(Object),
 			);

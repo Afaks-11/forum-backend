@@ -30,6 +30,7 @@ process.env.BULL_BOARD_PASSWORD ??= "mock_secure_password";
 process.env.SMTP_USER ??= "test@example.com";
 process.env.SMTP_PASS ??= "mock_smtp_password";
 process.env.SMTP_FROM ??= "Forum Platform Security <test@example.com>";
+process.env.ADMIN_REGISTRATION_SECRET ??= "mock_admin_registration_secret";
 
 /**
  * Integration and E2E runs publish live container endpoints here. Overriding

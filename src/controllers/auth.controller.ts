@@ -1,3 +1,4 @@
+import { env } from "../config/env.config.js";
 import { AppError } from "../errors/AppError.js";
 import { asyncHandler } from "../middlewares/asyncHandler.js";
 import {
@@ -44,7 +45,7 @@ export const login = asyncHandler(async (req, res) => {
 	// cannot read it; only the short-lived access token is handed to the caller.
 	res.cookie("refreshToken", result.refreshToken, {
 		httpOnly: true,
-		secure: process.env.NODE_ENV === "production",
+		secure: env.app.nodeEnv === "production",
 		sameSite: "strict",
 		maxAge: 7 * 24 * 60 * 60 * 1000,
 	});
@@ -71,7 +72,9 @@ export const refresh = asyncHandler(async (req, res) => {
 	} catch (error) {
 		// A rejected token will never become valid again, so drop the cookie to
 		// stop the client retrying with it on every subsequent request.
-		res.clearCookie("refreshToken");
+		if (!(error instanceof AppError && error.statusCode === 503)) {
+			res.clearCookie("refreshToken");
+		}
 		throw error;
 	}
 });
@@ -86,7 +89,7 @@ export const logout = asyncHandler(async (req, res) => {
 
 	res.clearCookie("refreshToken", {
 		httpOnly: true,
-		secure: process.env.NODE_ENV === "production",
+		secure: env.app.nodeEnv === "production",
 		sameSite: "strict",
 	});
 

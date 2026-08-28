@@ -19,10 +19,18 @@ export class TokenBlacklistRepository {
 	}
 
 	/**
-	 * Check if a token is registered on our blacklist
+	 * Reports whether a token has been revoked.
+	 *
+	 * Reads through the raw client rather than the `redis` facade deliberately.
+	 * The facade swallows every error and returns `false`, which for this
+	 * particular check means "not revoked" — a Redis outage would silently
+	 * resurrect a token the user explicitly logged out for the rest of its
+	 * seven-day life. Every other facade consumer trades only performance when
+	 * Redis is down; this one would trade security, so the error is allowed to
+	 * propagate and the caller fails closed.
 	 */
 	async isBlacklisted(token: string): Promise<boolean> {
-		const result = await redis.exists(`${this.PREFIX}${token}`);
-		return Boolean(result);
+		const result = await redis.getClient().exists(`${this.PREFIX}${token}`);
+		return result === 1;
 	}
 }

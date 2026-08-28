@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.config.js";
 import { AppError } from "../errors/AppError.js";
 import { SystemRole } from "../generated/prisma/enums.js";
-import { emailQueue } from "../queues/email.queue.js";
+import { enqueueSystemEmail } from "../queues/email.queue.js";
 import {
 	tokenBlacklistRepository,
 	userRepository,
@@ -58,7 +58,7 @@ export const registerUser = async (data: RegisterInput) => {
 		verificationToken,
 		emailVerifyTokenExpires,
 	});
-	await emailQueue.add(`verify-email:${newUser.id}`, {
+	await enqueueSystemEmail(`verify-email:${newUser.id}`, {
 		to: newUser.email,
 		subject: "Verify Your Forum Account",
 		htmlContent: `<h1>Welcome ${newUser.username}!</h1>
@@ -73,7 +73,28 @@ export const registerUser = async (data: RegisterInput) => {
  * Applies the failed-attempt lockout and rejects unverified or deleted accounts.
  */
 export const loginUser = async (data: LoginInput) => {
-	const user = await userRepository.findByEmail(data.email);
+	let user = await userRepository.findByEmail(data.email);
+
+	// The lock is evaluated before the hash comparison so a locked account costs
+	// one indexed read instead of ~70ms of bcrypt per attempt; otherwise the
+	// lockout is useless as a CPU-exhaustion defence.
+	if (user?.lockUntil) {
+		if (user.lockUntil > new Date()) {
+			throw new AppError(
+				`Account temporarily locked. Please try again after ${user.lockUntil.toLocaleTimeString()}`,
+				423,
+			);
+		}
+
+		// An elapsed window is a reset point, not a starting score. Leaving the
+		// counter at 5 let one further wrong password re-arm the lock forever, so
+		// an attacker who only knew an email address could keep any account locked
+		// indefinitely at one request per window.
+		user = await userRepository.updateLoginLockState(user.id, {
+			loginAttempts: 0,
+			lockUntil: null,
+		});
+	}
 
 	// Always run a bcrypt comparison, even for unknown emails. Skipping it would
 	// let an attacker distinguish registered from unregistered addresses by
@@ -83,13 +104,6 @@ export const loginUser = async (data: LoginInput) => {
 	const hashToValidate = user ? user.password : DUMMY_HASH;
 	const isPasswordValid = await bcrypt.compare(data.password, hashToValidate);
 
-	if (user?.lockUntil && user.lockUntil > new Date()) {
-		throw new AppError(
-			`Account temporarily locked. Please try again after ${user.lockUntil.toLocaleTimeString()}`,
-			423,
-		);
-	}
-
 	if (!user || !isPasswordValid) {
 		if (user) {
 			const updatedUser = await userRepository.incrementLoginAttemptsAtomic(
@@ -97,7 +111,7 @@ export const loginUser = async (data: LoginInput) => {
 			);
 
 			if (updatedUser.loginAttempts === 5) {
-				await emailQueue.add(`login-attempt-failed:${user.id}`, {
+				await enqueueSystemEmail(`login-attempt-failed:${user.id}`, {
 					to: user.email,
 					subject: "Security Alert: Too many failed login attempts",
 					htmlContent: `<p>Your account has been locked for 15 minutes due to 5 consecutive failed login attempts.</p>`,
@@ -145,15 +159,12 @@ export const loginUser = async (data: LoginInput) => {
 		},
 	);
 
-	await emailQueue
-		.add(`login-user:${user.id}`, {
-			to: user.email,
-			subject: "New Login Detected",
-			htmlContent: `<p>Hello ${user.username}, a new login was recorded at ${new Date().toISOString()}.</p>`,
-		})
-		.catch((err) =>
-			logger.error({ err }, "Failed to queue login notification"),
-		);
+	await enqueueSystemEmail(`login-user:${user.id}`, {
+		to: user.email,
+		subject: "New Login Detected",
+		htmlContent: `<p>Hello ${user.username}, a new login was recorded at ${new Date().toISOString()}.</p>`,
+	});
+
 	return {
 		user: { id: user.id, username: user.username, email: user.email },
 		accessToken,
@@ -166,7 +177,25 @@ export const loginUser = async (data: LoginInput) => {
  * Rejects blacklisted tokens and tokens signed against a since-changed password.
  */
 export const refreshAccessToken = async (token: string) => {
-	const isBlacklisted = await tokenBlacklistRepository.isBlacklisted(token);
+	// The denylist lookup fails closed. `isBlacklisted` propagates Redis errors
+	// instead of reporting "not revoked", and an unverifiable session must not be
+	// renewed — 503 tells the client to retry rather than implying bad
+	// credentials. Refreshes are low-volume, so requiring a healthy Redis to mint
+	// access tokens is the correct trade.
+	let isBlacklisted: boolean;
+	try {
+		isBlacklisted = await tokenBlacklistRepository.isBlacklisted(token);
+	} catch (error) {
+		logger.error(
+			{ err: error },
+			"Refresh rejected: the token denylist is unreachable.",
+		);
+		throw new AppError(
+			"Unable to verify session state right now. Please try again shortly.",
+			503,
+		);
+	}
+
 	if (isBlacklisted) {
 		throw new AppError("Invalid or expired refresh token", 401);
 	}
@@ -278,7 +307,7 @@ export const processForgotPassword = async (email: string) => {
 		passwordResetToken: resetToken,
 	});
 
-	await emailQueue.add(`process-forgotten-password:${user.id}`, {
+	await enqueueSystemEmail(`process-forgotten-password:${user.id}`, {
 		to: user.email,
 		subject: "<h1>Password Reset Secure Token</h1>",
 		htmlContent: `<p>You requested a password reset. Use this token to reset your credentials within 15 minutes:</p>
@@ -307,7 +336,7 @@ export const resendVerificationToken = async (email: string) => {
 		newVerificationTokenExpires,
 	);
 
-	await emailQueue.add(`resent-verification-token:${user.id}`, {
+	await enqueueSystemEmail(`resent-verification-token:${user.id}`, {
 		to: user.email,
 		subject: "Re-sent Verification Token",
 		htmlContent: `<p>Here is your new secure token:</p>

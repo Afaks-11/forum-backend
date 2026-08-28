@@ -6,16 +6,18 @@ import { z } from "zod";
 // extension is idempotent.
 extendZodWithOpenApi(z);
 
+export const usernameSchema = z
+	.string()
+	.min(3, "Username must be at least 3 characters")
+	.max(20, "Username cannot exceed 20 characters")
+	.regex(
+		/^[a-zA-Z0-9_]+$/,
+		"Username can only contain alphanumeric characters and underscores",
+	);
+
 export const registerSchema = z
 	.object({
-		username: z
-			.string()
-			.min(3, "Username must be at least 3 characters")
-			.max(20, "Username cannot exceed 20 characters")
-			.regex(
-				/^[a-zA-Z0-9_]+$/,
-				"Username can only contain alphanumeric characters and underscores",
-			),
+		username: usernameSchema,
 		email: z.email("Invalid email format"),
 		password: z.string().min(8, "Password must be atleast 8 characters long"),
 		adminSecret: z.string().optional().openapi({
@@ -28,10 +30,7 @@ export const registerSchema = z
 
 export const updateMeSchema = z
 	.object({
-		username: z
-			.string()
-			.min(3, "Username must be at 3 characters")
-			.max(20, "Username cannot exceed 20 characters"),
+		username: usernameSchema,
 	})
 	.openapi("UpdateMeInput");
 
