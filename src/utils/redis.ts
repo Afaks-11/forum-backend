@@ -1,6 +1,7 @@
 import { Redis } from "ioredis";
 import { env } from "../config/env.config.js";
 import { logger } from "./logger.js";
+import { cacheOperationCounter } from "./metrics.js";
 
 /**
  * Cache facade over a single shared ioredis connection.
@@ -77,14 +78,23 @@ class RedisService {
 	}
 
 	/**
-	 * Get a deserialized value from cache
+	 * Get a deserialized value from cache.
+	 *
+	 * Hits, misses, and errors are counted so the caching strategy can be
+	 * measured instead of assumed — a cache with a broken invalidation key looks
+	 * identical to a working one until the hit ratio is visible.
 	 */
 	async get<T>(key: string): Promise<T | null> {
 		try {
 			const value = await this.client.get(key);
-			if (!value) return null;
+			if (!value) {
+				cacheOperationCounter.inc({ result: "miss" });
+				return null;
+			}
+			cacheOperationCounter.inc({ result: "hit" });
 			return JSON.parse(value) as T;
 		} catch (error) {
+			cacheOperationCounter.inc({ result: "error" });
 			logger.error(
 				{ err: error, cachekey: key },
 				`Redis GET error for key ${key}: `,
@@ -100,7 +110,9 @@ class RedisService {
 		try {
 			const serialized = JSON.stringify(value);
 			await this.client.set(key, serialized, "EX", ttlSeconds);
+			cacheOperationCounter.inc({ result: "write" });
 		} catch (error) {
+			cacheOperationCounter.inc({ result: "error" });
 			logger.error(
 				{ err: error, cachekey: key },
 				`Redis SET error for key ${key}: `,
@@ -109,37 +121,31 @@ class RedisService {
 	}
 
 	/**
-	 * Delete a key from cache (Invalidation)
+	 * Delete one key or a list of keys (invalidation).
+	 *
+	 * A single string is wrapped rather than spread: spreading `"post:123"`
+	 * expands it into eight one-character arguments, so every single-key
+	 * eviction in the codebase silently deleted keys named "p", "o", "s"… and
+	 * left the real entry in place until its TTL expired.
 	 */
 	async del(key: string | string[]): Promise<void> {
+		const keys = Array.isArray(key) ? key : [key];
+		if (keys.length === 0) return;
+
 		try {
-			await this.client.del(...key);
+			await this.client.del(...keys);
 		} catch (error) {
 			logger.error(
-				{ err: error, cachekey: key },
-				`Redis DEL errror for key ${key}: `,
+				{ err: error, cachekey: keys },
+				`Redis DEL error for keys ${keys.join(", ")}: `,
 			);
 		}
 	}
 
 	/**
-	 * Check if a key exists
-	 */
-	async exists(key: string): Promise<boolean> {
-		try {
-			const result = await this.client.exists(key);
-			return result === 1;
-		} catch (error) {
-			logger.error(
-				{ err: error, cachekey: key },
-				`Redis EXISTS validation error for key ${key}`,
-			);
-			return false;
-		}
-	}
-
-	/**
-	 * Get raw client for specialized uses (like rate-limiting stores)
+	 * Get raw client for specialized uses (rate-limit stores, ZSET ranking reads,
+	 * and any check whose correctness depends on an error being visible rather
+	 * than swallowed — see `TokenBlacklistRepository.isBlacklisted`).
 	 */
 	getClient(): Redis {
 		return this.client;

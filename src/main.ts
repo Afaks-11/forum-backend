@@ -20,6 +20,15 @@ const PORT = env.app.port;
 
 const httpServer = createServer(app);
 
+// Node's defaults (300s request timeout, 60s headers timeout) are far more
+// generous than any endpoint here needs. Tightening them means a stalled or
+// slow-loris client releases its socket instead of occupying a connection for
+// five minutes, and pairs with the database timeouts in `utils/prisma.ts` so no
+// layer waits without bound.
+httpServer.requestTimeout = 30_000;
+httpServer.headersTimeout = 15_000;
+httpServer.keepAliveTimeout = 20_000;
+
 async function bootstrap() {
 	try {
 		initSocketServer(httpServer);

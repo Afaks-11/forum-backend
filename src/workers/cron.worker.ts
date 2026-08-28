@@ -1,13 +1,15 @@
 import { type Job, Worker } from "bullmq";
 import { createQueueConnection } from "../queues/connection.js";
 import type { CronJobData } from "../queues/cron.queue.js";
+import { rankingQueue } from "../queues/ranking.queue.js";
 import { logger } from "../utils/logger.js";
 import { prisma } from "../utils/prisma.js";
 
 /**
  * Executes scheduled maintenance actions dispatched by the cron queue.
- * Both branches delete through Prisma directly rather than a repository: these
- * are retention sweeps with no domain rules, not application reads or writes.
+ * The purge branches delete through Prisma directly rather than a repository:
+ * these are retention sweeps with no domain rules, not application reads or
+ * writes.
  */
 export const cronWorker = new Worker<CronJobData>(
 	"cron-queue",
@@ -77,6 +79,21 @@ export const cronWorker = new Worker<CronJobData>(
 					{ purgedCount: result.count },
 					`[Cron Worker] Hard-purged soft-deleted communities older than 30 days.`,
 				);
+				break;
+			}
+
+			case "RANK_FEED": {
+				// The scheduler owns one repeatable-job registry, so RANK_FEED is
+				// scheduled here and forwarded to the dedicated ranking queue rather
+				// than executed inline. The ranking pass holds a Redis pipeline and a
+				// batched UPDATE open; running it on the shared cron worker would let
+				// it block the retention sweeps behind it.
+				await rankingQueue.add("rank-feed", {});
+
+				logger.info(
+					"[Cron Worker] Dispatched a feed ranking pass to the ranking queue.",
+				);
+				break;
 			}
 		}
 	},

@@ -19,6 +19,13 @@ export const env = {
 	app: {
 		nodeEnv: process.env.NODE_ENV ?? "development",
 		port: parseInt(process.env.PORT ?? "3000", 10),
+		// Number of reverse-proxy hops in front of this process. Express needs it
+		// to resolve the real client IP from `X-Forwarded-For`; without it every
+		// caller behind a proxy shares one rate-limit bucket, and with too high a
+		// value a client can forge the header and get its own. `1` matches the
+		// documented deployment shape (single load balancer or ingress); set it to
+		// `0` when the process is exposed directly.
+		trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10),
 		corsOrigins: (
 			process.env.CORS_ORIGINS ?? "http://localhost:3000,http://localhost:5173"
 		)

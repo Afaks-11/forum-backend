@@ -58,7 +58,7 @@ router.get("/ready", async (_req, res) => {
 	} catch (error) {
 		logger.error(
 			{ err: error },
-			"Readiness check failed for PostgreSQL dtabase layer",
+			"Readiness check failed for PostgreSQL database layer",
 		);
 		healthStatus.services.database = "DOWN";
 		healthStatus.status = "DOWN";

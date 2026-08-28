@@ -1,7 +1,4 @@
 import client, { Histogram } from "prom-client";
-import { cronQueue } from "../queues/cron.queue.js";
-import { emailQueue } from "../queues/email.queue.js";
-import { notificationQueue } from "../queues/notification.queue.js";
 
 // Default collectors (CPU, memory, event-loop lag) are namespaced so forum
 // series never collide with metrics from sidecars sharing the same Prometheus.
@@ -31,16 +28,40 @@ export const bullmqQueueJobsGauge = new client.Gauge({
 	labelNames: ["queue", "state"],
 });
 
+export const cacheOperationCounter = new client.Counter({
+	name: "forum_cache_operations_total",
+	help: "Cache reads and writes by outcome, so the caching strategy can be measured rather than assumed",
+	labelNames: ["result"],
+});
+
 /**
  * Refreshes the BullMQ backlog gauge from Redis.
  * Called on each scrape rather than on job events so the numbers stay accurate
  * even for jobs enqueued by other processes.
+ *
+ * The queue modules are imported lazily here on purpose. `utils/` sits below
+ * `queues/` in the dependency order, and a module-scope import would mean that
+ * merely importing the Redis facade opened four BullMQ connections as a side
+ * effect.
  */
 export const syncBullMQMetrics = async (): Promise<void> => {
+	const [
+		{ cronQueue },
+		{ emailQueue },
+		{ notificationQueue },
+		{ rankingQueue },
+	] = await Promise.all([
+		import("../queues/cron.queue.js"),
+		import("../queues/email.queue.js"),
+		import("../queues/notification.queue.js"),
+		import("../queues/ranking.queue.js"),
+	]);
+
 	const queueMap = [
 		{ name: "cron-queue", instance: cronQueue },
 		{ name: "email-queue", instance: emailQueue },
 		{ name: "notification-queue", instance: notificationQueue },
+		{ name: "ranking-cron-queue", instance: rankingQueue },
 	];
 
 	for (const queue of queueMap) {

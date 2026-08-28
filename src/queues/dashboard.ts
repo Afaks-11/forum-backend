@@ -4,6 +4,7 @@ import { ExpressAdapter } from "@bull-board/express";
 import { cronQueue } from "./cron.queue.js";
 import { emailQueue } from "./email.queue.js";
 import { notificationQueue } from "./notification.queue.js";
+import { rankingQueue } from "./ranking.queue.js";
 
 let serverAdapter: ExpressAdapter | null = null;
 
@@ -22,6 +23,7 @@ export const getQueueDashboardAdapter = (): ExpressAdapter => {
 				new BullMQAdapter(emailQueue),
 				new BullMQAdapter(notificationQueue),
 				new BullMQAdapter(cronQueue),
+				new BullMQAdapter(rankingQueue),
 			],
 			serverAdapter,
 			options: {
