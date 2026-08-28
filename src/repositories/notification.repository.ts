@@ -22,22 +22,48 @@ export class NotificationRepository {
 	/**
 	 * Retrieve all notifications for a recipient, sorted chronologically (newest first)
 	 */
-	async findAllByRecipientId(recipientId: string) {
-		return await this.prisma.notification.findMany({
+	async findAllByRecipientId(
+		recipientId: string,
+		limit: number,
+		cursor?: string,
+	) {
+		const rows = await this.prisma.notification.findMany({
 			where: { recipientId },
+			take: limit + 1,
+			...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
 			include: { sender: { select: { username: true } } },
-			orderBy: { createdAt: "desc" },
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
 		});
+		const hasNextPage = rows.length > limit;
+		if (hasNextPage) rows.pop();
+		const last = rows[rows.length - 1];
+		return { items: rows, nextCursor: hasNextPage && last ? last.id : null };
 	}
 
 	/**
 	 * Retrieve unread notifications for a recipient, sorted chronologically (newest first)
 	 */
-	async findUnreadByRecipientId(recipientId: string) {
-		return await this.prisma.notification.findMany({
+	async findUnreadByRecipientId(
+		recipientId: string,
+		limit: number,
+		cursor?: string,
+	) {
+		const rows = await this.prisma.notification.findMany({
 			where: { recipientId, isRead: false },
+			take: limit + 1,
+			...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
 			include: { sender: { select: { username: true } } },
-			orderBy: { createdAt: "desc" },
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+		});
+		const hasNextPage = rows.length > limit;
+		if (hasNextPage) rows.pop();
+		const last = rows[rows.length - 1];
+		return { items: rows, nextCursor: hasNextPage && last ? last.id : null };
+	}
+
+	async countUnreadByRecipientId(recipientId: string) {
+		return await this.prisma.notification.count({
+			where: { recipientId, isRead: false },
 		});
 	}
 

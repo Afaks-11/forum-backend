@@ -36,14 +36,14 @@ export const notificationWorker = new Worker<NotificationJobData>(
 				createdNotification,
 			);
 			logger.info(
-				{ recipientId: payload.recipientId },
+				{ recipientId: payload.recipientId, traceId: payload.traceId },
 				`Real-time notification dispatched directly to user:${payload.recipientId}`,
 			);
 		} catch (socketError) {
 			// A missing socket server must not fail the job: the row is already
 			// stored and the client will see it on its next poll.
 			logger.warn(
-				{ err: socketError },
+				{ err: socketError, traceId: payload.traceId },
 				"Socket system offline; falling back to DB storage",
 			);
 		}

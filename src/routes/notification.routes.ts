@@ -3,6 +3,7 @@ import {
 	destroySingleNotification,
 	fetchAllNotifications,
 	fetchUnreadNotification,
+	fetchUnreadNotificationCount,
 	readAllNotifications,
 	readSingleNotification,
 } from "../controllers/notification.controller.js";
@@ -16,6 +17,7 @@ router.use(requireAuth);
 
 router.get("/", fetchAllNotifications);
 router.get("/unread", fetchUnreadNotification);
+router.get("/unread/count", fetchUnreadNotificationCount);
 router.patch("/read-all", readAllNotifications);
 router.patch("/:id/read", readSingleNotification);
 router.delete("/:id", destroySingleNotification);

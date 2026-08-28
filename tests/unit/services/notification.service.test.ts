@@ -3,19 +3,20 @@ import { AppError } from "../../../src/errors/AppError.js";
 
 // Module Level Infrastructure Mocks typed safely using 'unknown'
 const mockNotificationRepository = {
-	findAllByRecipientId: jest.fn<(...args: unknown[]) => Promise<unknown[]>>(),
-	findUnreadByRecipientId:
-		jest.fn<(...args: unknown[]) => Promise<unknown[]>>(),
+	findAllByRecipientId: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findUnreadByRecipientId: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateReadStatus: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateManyReadStatusByRecipient:
 		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	delete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	countUnreadByRecipientId: jest.fn<(...args: unknown[]) => Promise<number>>(),
 };
 
 const mockNotificationQueue = {
 	add: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
+const mockGetTraceId = jest.fn<() => string | undefined>();
 
 // Isolate ES Modules prior to test environment execution
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
@@ -27,6 +28,9 @@ await jest.unstable_mockModule(
 		notificationQueue: mockNotificationQueue,
 	}),
 );
+await jest.unstable_mockModule("../../../src/utils/requestContext.js", () => ({
+	getTraceId: mockGetTraceId,
+}));
 
 // Resolve targeted operations under testing
 const {
@@ -47,16 +51,17 @@ describe("Notification Service Unit Test Suite", () => {
 				{ id: "ntf_1", recipientId: "usr_123", title: "Alert One" },
 				{ id: "ntf_2", recipientId: "usr_123", title: "Alert Two" },
 			];
-			mockNotificationRepository.findAllByRecipientId.mockResolvedValue(
-				databaseBuffer,
-			);
+			mockNotificationRepository.findAllByRecipientId.mockResolvedValue({
+				items: databaseBuffer,
+				nextCursor: null,
+			});
 
-			const result = await getAllNotifications("usr_123");
+			const result = await getAllNotifications("usr_123", { limit: 20 });
 
 			expect(
 				mockNotificationRepository.findAllByRecipientId,
-			).toHaveBeenCalledWith("usr_123");
-			expect(result).toEqual(databaseBuffer);
+			).toHaveBeenCalledWith("usr_123", 20, undefined);
+			expect(result).toEqual({ items: databaseBuffer, nextCursor: null });
 		});
 	});
 
@@ -67,16 +72,17 @@ describe("Notification Service Unit Test Suite", () => {
 			const databaseBuffer = [
 				{ id: "ntf_1", recipientId: "usr_123", isRead: false },
 			];
-			mockNotificationRepository.findUnreadByRecipientId.mockResolvedValue(
-				databaseBuffer,
-			);
+			mockNotificationRepository.findUnreadByRecipientId.mockResolvedValue({
+				items: databaseBuffer,
+				nextCursor: null,
+			});
 
-			const result = await getUnreadNotifications("usr_123");
+			const result = await getUnreadNotifications("usr_123", { limit: 20 });
 
 			expect(
 				mockNotificationRepository.findUnreadByRecipientId,
-			).toHaveBeenCalledWith("usr_123");
-			expect(result).toEqual(databaseBuffer);
+			).toHaveBeenCalledWith("usr_123", 20, undefined);
+			expect(result).toEqual({ items: databaseBuffer, nextCursor: null });
 		});
 	});
 
@@ -215,11 +221,13 @@ describe("Notification Service Unit Test Suite", () => {
 
 		it("Happy Path: should dispatch valid notification data payloads out into active worker queues", async () => {
 			mockNotificationQueue.add.mockReset();
+			mockGetTraceId.mockReturnValue(undefined);
 
 			const inputPayload = {
 				recipientId: "usr_recipient",
 				senderId: "usr_sender",
 				type: "REPLY" as const,
+				dedupeKey: "reply-123",
 				title: "New reply notification alert",
 				content: "Someone replied to your comment thread.",
 				link: "/posts/123",
@@ -232,8 +240,27 @@ describe("Notification Service Unit Test Suite", () => {
 			expect(mockNotificationQueue.add).toHaveBeenCalledWith(
 				"notification:recipient:usr_recipient",
 				inputPayload,
+				expect.objectContaining({ jobId: expect.any(String) }),
 			);
 			expect(result).toEqual({ id: "job_999" });
+		});
+
+		it("Reliability: should log and swallow a queue outage after the originating write committed", async () => {
+			mockNotificationQueue.add.mockRejectedValue(
+				new Error("Redis unavailable"),
+			);
+			mockGetTraceId.mockReturnValue("trace-123");
+
+			await expect(
+				sendInternalNotification({
+					recipientId: "usr_recipient",
+					senderId: "usr_sender",
+					type: "COMMENT",
+					dedupeKey: "comment-1",
+					title: "New comment",
+					content: "A committed comment",
+				}),
+			).resolves.toBeNull();
 		});
 	});
 });

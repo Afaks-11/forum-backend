@@ -13,6 +13,13 @@ export interface NotificationJobData {
 	title: string;
 	content: string;
 	link?: string;
+	/** Stable id of the committed event that produced this notification. */
+	dedupeKey?: string;
+	/**
+	 * Trace ID of the request that queued this job, when there was one. Lets a
+	 * worker-side failure be joined back to the originating request.
+	 */
+	traceId?: string;
 }
 
 export const notificationQueue = new Queue<NotificationJobData>(
