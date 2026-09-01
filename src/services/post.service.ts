@@ -4,9 +4,15 @@ import {
 	communityRepository,
 	postRepository,
 	reportRepository,
+	userRepository,
 } from "../repositories/index.js";
-import { prisma } from "../utils/prisma.js";
+import {
+	invalidatePostCaches,
+	postDetailCacheKey,
+	postVoteTallyCacheKey,
+} from "../utils/postCache.js";
 import { redis } from "../utils/redis.js";
+import { isAdmin } from "../utils/roles.js";
 import type {
 	CreatePostInput,
 	PostSearchInput,
@@ -15,9 +21,6 @@ import { sendInternalNotification } from "./notification.service.js";
 
 type PostPayload = NonNullable<
 	Awaited<ReturnType<typeof postRepository.findById>>
->;
-type AdvancedFeedPayload = Awaited<
-	ReturnType<typeof postRepository.getAdvancedFeed>
 >;
 type SearchPostsResult = Awaited<ReturnType<typeof postRepository.searchPosts>>;
 
@@ -41,32 +44,23 @@ interface VoteMetricsPayload {
 	currentUserVote: VoteType | null;
 }
 
+/** Viewer-agnostic half of the vote metrics payload — the part worth caching. */
+type VoteTallyPayload = Omit<VoteMetricsPayload, "currentUserVote">;
+
 /**
- * Resolves the caller's own vote for a page of posts in one query and folds it
- * into each row.
+ * Resolves one viewer's own vote on a post via the `(userId, postId)` unique.
  *
- * Feed pages are cached without viewer context so every reader shares one
- * entry; the per-viewer field is layered on afterwards, on both the cache hit
- * and miss paths. Doing it here rather than in the repository keeps the cached
- * payload viewer-agnostic.
+ * Kept out of the cached payload so the cached value stays viewer-agnostic; the
+ * lookup it replaces is a single indexed read.
  */
-const attachViewerVotes = async <T extends { id: string }>(
-	posts: T[],
+const resolveViewerVote = async (
+	postId: string,
 	viewerId?: string,
-): Promise<(T & { currentUserVote: VoteType | null })[]> => {
-	if (!viewerId || posts.length === 0) {
-		return posts.map((post) => ({ ...post, currentUserVote: null }));
-	}
+): Promise<VoteType | null> => {
+	if (!viewerId) return null;
 
-	const votes = await postRepository.findViewerVotes(
-		posts.map((post) => post.id),
-		viewerId,
-	);
-
-	return posts.map((post) => ({
-		...post,
-		currentUserVote: votes.get(post.id) ?? null,
-	}));
+	const votes = await postRepository.findViewerVotes([postId], viewerId);
+	return votes.get(postId) ?? null;
 };
 
 /**
@@ -92,7 +86,7 @@ export const createPost = async (data: CreatePostInput, authorId: string) => {
  * Soft-deleted posts are excluded by the repository, so this 404s for them.
  */
 export const getPostById = async (id: string) => {
-	const cacheKey = `post:${id}`;
+	const cacheKey = postDetailCacheKey(id);
 
 	const cachedPost = await redis.get<PostPayload>(cacheKey);
 	if (cachedPost) return cachedPost;
@@ -123,7 +117,7 @@ export const updatePostFields = async (
 
 	const updatedPost = await postRepository.update(postId, updatePayload);
 
-	await redis.del(`post:${postId}`);
+	await invalidatePostCaches(postId);
 	await redis.delPattern("feed:advanced:*");
 	await redis.delPattern("feed:community:*");
 
@@ -142,43 +136,11 @@ export const softDeletePost = async (postId: string, userId: string) => {
 
 	const result = await postRepository.softDelete(postId);
 
-	await redis.del(`post:${postId}`);
+	await invalidatePostCaches(postId);
 	await redis.delPattern("feed:advanced:*");
 	await redis.delPattern("feed:community:*");
 
 	return result;
-};
-
-/**
- * Cursor-paginated feed with sort and filter support, cached for five minutes.
- * The cached page is viewer-agnostic; the caller's own vote is attached after
- * the cache lookup so one entry serves every reader.
- */
-export const getAdvancedPostsFeed = async (
-	filters: {
-		sort?: "new" | "top" | "hot" | "controversial";
-		community?: string;
-		author?: string;
-		cursor?: string;
-		limit?: number;
-	},
-	viewerId?: string,
-) => {
-	// The filter set is hashed into the key so each sort/community/cursor
-	// combination caches independently instead of overwriting one another.
-	const filterHash = Buffer.from(JSON.stringify(filters)).toString("base64");
-	const cacheKey = `feed:advanced:${filterHash}`;
-
-	let feed = await redis.get<AdvancedFeedPayload>(cacheKey);
-	if (!feed) {
-		feed = await postRepository.getAdvancedFeed(filters);
-		await redis.set(cacheKey, feed, 300);
-	}
-
-	return {
-		...feed,
-		posts: await attachViewerVotes(feed.posts, viewerId),
-	};
 };
 
 /**
@@ -212,28 +174,19 @@ export const modifyPostModerationState = async (
 	const post = await postRepository.findUniqueById(postId);
 	if (!post || post.deletedAt) throw new AppError("Post not found", 404);
 
-	const caller = await prisma.user.findUnique({
-		where: { id: userId },
-		select: { role: true },
-	});
-
-	const isAdmin = caller?.role === "ADMIN";
+	const caller = await userRepository.findById(userId);
+	const hasAdminRole = isAdmin(caller?.role);
 
 	let isCommunityMod = false;
 	if (post.communityId) {
-		const membership = await prisma.membership.findUnique({
-			where: {
-				userId_communityId: {
-					userId: userId,
-					communityId: post.communityId,
-				},
-			},
-			select: { role: true },
-		});
+		const membership = await communityRepository.findMembership(
+			userId,
+			post.communityId,
+		);
 		isCommunityMod = membership?.role === "MODERATOR";
 	}
 
-	const isModOrAdmin = isAdmin || isCommunityMod;
+	const isModOrAdmin = hasAdminRole || isCommunityMod;
 
 	switch (action.action) {
 		case "LOCK": {
@@ -270,7 +223,7 @@ export const modifyPostModerationState = async (
 				lockSetById,
 			);
 
-			await redis.del(`post:${postId}`);
+			await invalidatePostCaches(postId);
 			await redis.delPattern("feed:advanced:*");
 
 			if (nextIsLocked && isModOrAdmin) {
@@ -278,6 +231,7 @@ export const modifyPostModerationState = async (
 					recipientId: post.authorId,
 					senderId: userId,
 					type: "MOD_ACTION",
+					dedupeKey: `post-lock:${postId}:${nextIsLocked}`,
 					title: "Your post has been locked",
 					content: `A moderator locked your post: "${post.title}". New comments are disabled.`,
 					link: `/posts/${postId}`,
@@ -295,7 +249,7 @@ export const modifyPostModerationState = async (
 				postId,
 				action.isPinned,
 			);
-			await redis.del(`post:${postId}`);
+			await invalidatePostCaches(postId);
 			await redis.delPattern("feed:advanced:*");
 			return updated;
 		}
@@ -313,21 +267,27 @@ export const modifyPostModerationState = async (
 /**
  * Returns a post's vote tally plus the caller's own vote.
  *
- * Tallies are read straight off the post's denormalized columns, and the
- * viewer's vote arrives on the same row, so this is a single query.
- *
- * Cached per viewer, because `currentUserVote` varies by authentication state —
- * a shared entry would leak one user's vote to everyone else. Invalidation
- * therefore has to sweep the whole `post:<id>:vote_metrics:*` family.
+ * Only the tally is cached, under one viewer-agnostic key. The previous shape
+ * (`post:<id>:vote_metrics:<viewerId>`) baked `currentUserVote` into the cached
+ * value, which fragmented the cache into one entry per reader and forced a SCAN
+ * sweep of the whole family on *every vote* — a keyspace scan on the hottest
+ * write path in the system. Layering the viewer's own vote on afterwards, the
+ * way the feed already does, makes invalidation a single exact-key delete and
+ * lets one entry serve every reader.
  */
 export const getPostVoteMetrics = async (
 	postId: string,
 	currentUserId?: string,
 ): Promise<VoteMetricsPayload> => {
-	const cacheKey = `post:${postId}:vote_metrics:${currentUserId}`;
+	const cacheKey = postVoteTallyCacheKey(postId);
 
-	const cachedMetrics = await redis.get<VoteMetricsPayload>(cacheKey);
-	if (cachedMetrics) return cachedMetrics;
+	const cachedTally = await redis.get<VoteTallyPayload>(cacheKey);
+	if (cachedTally) {
+		return {
+			...cachedTally,
+			currentUserVote: await resolveViewerVote(postId, currentUserId),
+		};
+	}
 
 	const post = await postRepository.findByIdWithViewerVote(
 		postId,
@@ -335,15 +295,18 @@ export const getPostVoteMetrics = async (
 	);
 	if (!post) throw new AppError("Post not found", 404);
 
-	const metricsPayload: VoteMetricsPayload = {
+	const tally: VoteTallyPayload = {
 		upvoteCount: post.upvoteCount,
 		downvoteCount: post.downvoteCount,
 		score: post.score,
-		currentUserVote: post.votes?.[0]?.type ?? null,
 	};
 
-	await redis.set(cacheKey, metricsPayload, 60);
-	return metricsPayload;
+	await redis.set(cacheKey, tally, 60);
+
+	return {
+		...tally,
+		currentUserVote: post.votes?.[0]?.type ?? null,
+	};
 };
 
 /**

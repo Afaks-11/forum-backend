@@ -4,6 +4,11 @@ import { AppError } from "../../../src/errors/AppError.js";
 // Module Level Repository and Core Subsystem Mocks
 const mockCommunityRepository = {
 	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
+const mockUserRepository = {
+	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
 const mockPostRepository = {
@@ -33,29 +38,18 @@ const mockRedis = {
 	delPattern: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
-const mockPrisma = {
-	user: {
-		findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	},
-	post: {
-		findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	},
-};
-
 const mockSendInternalNotification =
 	jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 // Isolate ES Modules prior to execution boundaries
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	communityRepository: mockCommunityRepository,
+	userRepository: mockUserRepository,
 	postRepository: mockPostRepository,
 	reportRepository: mockReportRepository,
 }));
 await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
 	redis: mockRedis,
-}));
-await jest.unstable_mockModule("../../../src/utils/prisma.js", () => ({
-	prisma: mockPrisma,
 }));
 await jest.unstable_mockModule(
 	"../../../src/services/notification.service.js",
@@ -70,12 +64,14 @@ const {
 	getPostById,
 	updatePostFields,
 	softDeletePost,
-	getAdvancedPostsFeed,
 	savePostAction,
 	modifyPostModerationState,
 	getPostVoteMetrics,
 	searchForPosts,
 } = await import("../../../src/services/post.service.js");
+const { getAdvancedPostsFeed } = await import(
+	"../../../src/services/feed.service.js"
+);
 
 const { createFakePost, createFakeCommunityPayload } = await import(
 	"../../fixtures/post.fixture.js"
@@ -175,7 +171,10 @@ describe("Post Service Unit Test Suite", () => {
 			expect(mockPostRepository.update).toHaveBeenCalledWith("post_123", {
 				title: "Updated Title",
 			});
-			expect(mockRedis.del).toHaveBeenCalledWith("post:post_123");
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"post:post_123",
+				"post:post_123:vote_tally",
+			]);
 			expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:advanced:*");
 			expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:community:*");
 			expect(result.title).toBe("Updated Title");
@@ -217,7 +216,10 @@ describe("Post Service Unit Test Suite", () => {
 			await softDeletePost("post_123", "usr_owner");
 
 			expect(mockPostRepository.softDelete).toHaveBeenCalledWith("post_123");
-			expect(mockRedis.del).toHaveBeenCalledWith("post:post_123");
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"post:post_123",
+				"post:post_123:vote_tally",
+			]);
 			expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:advanced:*");
 			expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:community:*");
 		});
@@ -244,14 +246,19 @@ describe("Post Service Unit Test Suite", () => {
 
 			await getAdvancedPostsFeed(filterSchema);
 
+			const repositoryFilters = {
+				sort: filterSchema.sort,
+				limit: 10,
+				community: filterSchema.community,
+			};
 			const predictableHash = Buffer.from(
-				JSON.stringify(filterSchema),
+				JSON.stringify(repositoryFilters),
 			).toString("base64");
 			expect(mockRedis.get).toHaveBeenCalledWith(
 				`feed:advanced:${predictableHash}`,
 			);
 			expect(mockPostRepository.getAdvancedFeed).toHaveBeenCalledWith(
-				filterSchema,
+				repositoryFilters,
 			);
 			expect(mockRedis.set).toHaveBeenCalledWith(
 				`feed:advanced:${predictableHash}`,
@@ -292,56 +299,55 @@ describe("Post Service Unit Test Suite", () => {
 			it("Happy Path (Owner Context): should allow post creator to toggle standard lock parameters", async () => {
 				const post = createFakePost({ authorId: "usr_owner", title: "Hello" });
 				mockPostRepository.findUniqueById.mockResolvedValue(post);
-				mockPrisma.user.findUnique.mockResolvedValue({ role: "USER" });
+				mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 
-				await modifyPostModerationState(
-					"post_123",
-					"usr_owner",
-					"LOCK",
-					true,
-					false,
-				);
+				await modifyPostModerationState("post_123", "usr_owner", {
+					action: "LOCK",
+					isLocked: true,
+				});
 
 				expect(mockPostRepository.updateLockStatus).toHaveBeenCalledWith(
 					"post_123",
 					true,
+					"usr_owner",
 				);
-				expect(mockRedis.del).toHaveBeenCalledWith("post:post_123");
-				expect(mockSendInternalNotification).toHaveBeenCalled();
+				expect(mockRedis.del).toHaveBeenCalledWith([
+					"post:post_123",
+					"post:post_123:vote_tally",
+				]);
+				expect(mockSendInternalNotification).not.toHaveBeenCalled();
 			});
 
 			it("Happy Path (Staff Context): should authorize non-owner accounts if they maintain staff privileges", async () => {
 				const post = createFakePost({ authorId: "usr_owner" });
 				mockPostRepository.findUniqueById.mockResolvedValue(post);
-				mockPrisma.user.findUnique.mockResolvedValue({ role: "MODERATOR" });
+				mockUserRepository.findById.mockResolvedValue({ role: "USER" });
+				mockCommunityRepository.findMembership.mockResolvedValue({
+					role: "MODERATOR",
+				});
 
-				await modifyPostModerationState(
-					"post_123",
-					"usr_staff",
-					"LOCK",
-					true,
-					false,
-				);
+				await modifyPostModerationState("post_123", "usr_staff", {
+					action: "LOCK",
+					isLocked: true,
+				});
 
 				expect(mockPostRepository.updateLockStatus).toHaveBeenCalledWith(
 					"post_123",
 					true,
+					"usr_staff",
 				);
 			});
 
 			it("Business Rule (Unauthorized): should block lock alteration requests from unaffiliated system accounts", async () => {
 				const post = createFakePost({ authorId: "usr_owner" });
 				mockPostRepository.findUniqueById.mockResolvedValue(post);
-				mockPrisma.user.findUnique.mockResolvedValue({ role: "USER" });
+				mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 
 				await expect(
-					modifyPostModerationState(
-						"post_123",
-						"usr_random",
-						"LOCK",
-						true,
-						false,
-					),
+					modifyPostModerationState("post_123", "usr_random", {
+						action: "LOCK",
+						isLocked: true,
+					}),
 				).rejects.toThrow(
 					new AppError("Forbidden: insufficient privileges", 403),
 				);
@@ -351,21 +357,21 @@ describe("Post Service Unit Test Suite", () => {
 		describe("Action: PIN", () => {
 			it("Happy Path: should execute internal visibility alterations and drop matching search cache contexts", async () => {
 				mockPostRepository.findUniqueById.mockResolvedValue(createFakePost());
-				mockPrisma.user.findUnique.mockResolvedValue({ role: "ADMIN" });
+				mockUserRepository.findById.mockResolvedValue({ role: "ADMIN" });
 
-				await modifyPostModerationState(
-					"post_123",
-					"usr_admin",
-					"PIN",
-					false,
-					true,
-				);
+				await modifyPostModerationState("post_123", "usr_admin", {
+					action: "PIN",
+					isPinned: true,
+				});
 
 				expect(mockPostRepository.updatePinStatus).toHaveBeenCalledWith(
 					"post_123",
 					true,
 				);
-				expect(mockRedis.del).toHaveBeenCalledWith("post:post_123");
+				expect(mockRedis.del).toHaveBeenCalledWith([
+					"post:post_123",
+					"post:post_123:vote_tally",
+				]);
 				expect(mockRedis.delPattern).toHaveBeenCalledWith("feed:advanced:*");
 			});
 
@@ -373,16 +379,13 @@ describe("Post Service Unit Test Suite", () => {
 				mockPostRepository.findUniqueById.mockResolvedValue(
 					createFakePost({ authorId: "usr_owner" }),
 				);
-				mockPrisma.user.findUnique.mockResolvedValue({ role: "USER" });
+				mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 
 				await expect(
-					modifyPostModerationState(
-						"post_123",
-						"usr_owner",
-						"PIN",
-						false,
-						true,
-					),
+					modifyPostModerationState("post_123", "usr_owner", {
+						action: "PIN",
+						isPinned: true,
+					}),
 				).rejects.toThrow(
 					new AppError("Forbidden: Moderator privileges required", 403),
 				);
@@ -394,14 +397,10 @@ describe("Post Service Unit Test Suite", () => {
 			it("Happy Path: should forward report structures into moderation queues", async () => {
 				mockPostRepository.findUniqueById.mockResolvedValue(createFakePost());
 
-				await modifyPostModerationState(
-					"post_123",
-					"usr_reporter",
-					"REPORT",
-					false,
-					false,
-					"Spam content",
-				);
+				await modifyPostModerationState("post_123", "usr_reporter", {
+					action: "REPORT",
+					reason: "Spam content",
+				});
 
 				expect(mockReportRepository.create).toHaveBeenCalledWith(
 					"post_123",
@@ -418,9 +417,7 @@ describe("Post Service Unit Test Suite", () => {
 				const response = await modifyPostModerationState(
 					"post_123",
 					"usr_123",
-					"HIDE",
-					false,
-					false,
+					{ action: "HIDE" },
 				);
 
 				expect(response).toEqual({
@@ -437,16 +434,16 @@ describe("Post Service Unit Test Suite", () => {
 				upvoteCount: 10,
 				downvoteCount: 2,
 				score: 8,
-				currentUserVote: "UPVOTE",
 			};
 			mockRedis.get.mockResolvedValue(scorePayload);
+			mockPostRepository.findViewerVotes.mockResolvedValue(
+				new Map([["post_123", "UPVOTE"]]),
+			);
 
 			const result = await getPostVoteMetrics("post_123", "usr_123");
 
-			expect(mockRedis.get).toHaveBeenCalledWith(
-				"post:post_123:vote_metrics:usr_123",
-			);
-			expect(result).toEqual(scorePayload);
+			expect(mockRedis.get).toHaveBeenCalledWith("post:post_123:vote_tally");
+			expect(result).toEqual({ ...scorePayload, currentUserVote: "UPVOTE" });
 		});
 
 		it("Happy Path (Cache Miss): should read stored counters and the viewer's own vote in a single query", async () => {
@@ -467,12 +464,11 @@ describe("Post Service Unit Test Suite", () => {
 				"usr_123",
 			);
 			expect(mockRedis.set).toHaveBeenCalledWith(
-				"post:post_123:vote_metrics:usr_123",
+				"post:post_123:vote_tally",
 				{
 					upvoteCount: 10,
 					downvoteCount: 3,
 					score: 7,
-					currentUserVote: "DOWNVOTE",
 				},
 				60,
 			);

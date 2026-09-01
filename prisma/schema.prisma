@@ -41,6 +41,12 @@ enum NotificationType {
   COMMUNITY_INVITE
 }
 
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
 enum PostType {
   TEXT
   LINK
@@ -82,8 +88,10 @@ model User {
   sentNotifications Notification[]  @relation("NotificationSender")
   savedPosts        SavedPost[]
   savedComments     SavedComment[]
-  postReports       Report[]
-  commentReports    CommentReport[]
+  postReports       Report[]        @relation("ReportReporter")
+  commentReports    CommentReport[] @relation("CommentReportReporter")
+  resolvedPostReports    Report[]        @relation("ReportResolver")
+  resolvedCommentReports CommentReport[] @relation("CommentReportResolver")
 
   @@index([deletedAt])
   @@map("users")
@@ -144,17 +152,22 @@ model Post {
   lockSetById String? @map("lock_set_by_id")
   lockSetBy User? @relation("PostLocks", fields: [lockSetById], references: [id], onDelete: SetNull)
 
-  // Denormalized vote tallies. The votes table stays the source of truth; these
-  // are maintained transactionally alongside every vote write so feed queries
-  // never have to aggregate.
   upvoteCount   Int @default(0) @map("upvote_count")
   downvoteCount Int @default(0) @map("downvote_count")
   score         Int @default(0)
 
-  // Maintained by the ranking worker. Persisted so the SQL feed fallback ranks
-  // identically to the Redis ZSETs instead of approximating with raw counts.
   hotScore           Float @default(0) @map("hot_score")
   controversialScore Float @default(0) @map("controversial_score")
+
+  // Generated tsvector over title + content, maintained by PostgreSQL itself and
+  // backed by a GIN index (see the `add_post_search_vector` migration). Search
+  // was `ILIKE '%q%'` on an unbounded text column — a sequential scan whose cost
+  // grew linearly with total content volume, with no relevance ordering.
+  //
+  // Declared `Unsupported` because Prisma has no tsvector type: the column is
+  // real and indexed, but only reachable through `$queryRaw`. It is never
+  // selected, so `postListInclude` and every generated payload are unchanged.
+  searchVector Unsupported("tsvector")? @map("search_vector")
 
   authorId String @map("author_id")
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
@@ -288,17 +301,32 @@ model Report {
   id String @id @default(uuid())
 
   reporterId String @map("reporter_id")
-  reporter   User   @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter   User   @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
 
   postId String @map("post_id")
   post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   reason String
 
-  createdAt DateTime @default(now()) @map("created_at")
+  // Triage state. Reports used to be write-only: there was no status, no
+  // resolver, and no way for a moderator to see or close one.
+  status     ReportStatus @default(PENDING)
+  resolvedAt DateTime?    @map("resolved_at")
 
+  resolvedById String? @map("resolved_by_id")
+  resolvedBy   User?   @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  resolutionNote String? @map("resolution_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // One report per person per post: repeat submissions update the existing row
+  // rather than flooding the queue with duplicates of the same complaint.
+  @@unique([reporterId, postId])
   @@index([postId])
   @@index([reporterId])
+  @@index([status, createdAt(sort: Desc)])
   @@map("reports")
 }
 
@@ -306,17 +334,28 @@ model CommentReport {
   id String @id @default(uuid())
 
   reporterId String @map("reporter_id")
-  reporter   User   @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter   User   @relation("CommentReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
 
   commentId String  @map("comment_id")
   comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   reason String
 
-  createdAt DateTime @default(now()) @map("created_at")
+  status     ReportStatus @default(PENDING)
+  resolvedAt DateTime?    @map("resolved_at")
 
+  resolvedById String? @map("resolved_by_id")
+  resolvedBy   User?   @relation("CommentReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  resolutionNote String? @map("resolution_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([reporterId, commentId])
   @@index([commentId])
   @@index([reporterId])
+  @@index([status, createdAt(sort: Desc)])
   @@map("comment_reports")
 }
 

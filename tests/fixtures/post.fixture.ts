@@ -46,6 +46,7 @@ export function createFakePost(
 		communityId: "cmnt_123",
 		isLocked: false,
 		isPinned: false,
+		lockSetById: null,
 		upvoteCount: 50,
 		downvoteCount: 8,
 		score: 42,

@@ -11,6 +11,7 @@ const mockVoteRepository = {
 };
 
 const mockRedis = {
+	del: jest.fn<(...args: unknown[]) => Promise<void>>(),
 	delPattern: jest.fn<(...args: unknown[]) => Promise<void>>(),
 };
 
@@ -46,6 +47,7 @@ describe("Vote Service Unit Test Suite", () => {
 	beforeEach(() => {
 		mockPostRepository.findUniqueById.mockReset();
 		mockVoteRepository.applyVote.mockReset();
+		mockRedis.del.mockReset();
 		mockRedis.delPattern.mockReset();
 		mockIsRetryableVoteConflict.mockReset();
 		mockIsRetryableVoteConflict.mockReturnValue(false);
@@ -130,9 +132,10 @@ describe("Vote Service Unit Test Suite", () => {
 				downvoteCount: 2,
 				currentUserVote: "UPVOTE",
 			});
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"post:post_123:vote_metrics:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"post:post_123",
+				"post:post_123:vote_tally",
+			]);
 		});
 
 		it("Happy Path (Vote Retraction): should surface a null currentUserVote once the vote is withdrawn", async () => {
@@ -155,9 +158,10 @@ describe("Vote Service Unit Test Suite", () => {
 			// The tally changed, so every viewer's cached copy of the metrics for
 			// this post must be dropped. `getPostVoteMetrics` keys the cache per
 			// viewer, hence the wildcard rather than a single del.
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"post:post_123:vote_metrics:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"post:post_123",
+				"post:post_123:vote_tally",
+			]);
 		});
 
 		it("Happy Path (Vote Transition): should report the flipped side as the viewer's current vote", async () => {

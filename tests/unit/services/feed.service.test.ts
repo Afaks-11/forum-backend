@@ -3,6 +3,8 @@ import { describe, expect, it, jest } from "@jest/globals";
 // Module Level Repository and Cache Interface Mocks typed safely using 'unknown'
 const mockPostRepository = {
 	findManyByIds: jest.fn<(...args: unknown[]) => Promise<unknown[]>>(),
+	findViewerVotes:
+		jest.fn<(...args: unknown[]) => Promise<Map<string, string>>>(),
 	getAdvancedFeed: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
@@ -65,8 +67,16 @@ describe("Feed Service Unit Test Suite", () => {
 				]);
 
 				expect(result.posts).toEqual([
-					{ id: "post_3", title: "Post Three System Overview" },
-					{ id: "post_1", title: "Post One Architecture Breakdown" },
+					{
+						id: "post_3",
+						title: "Post Three System Overview",
+						currentUserVote: null,
+					},
+					{
+						id: "post_1",
+						title: "Post One Architecture Breakdown",
+						currentUserVote: null,
+					},
 				]);
 				expect(result.nextCursor).toBe("2");
 			});
@@ -130,14 +140,24 @@ describe("Feed Service Unit Test Suite", () => {
 				});
 
 				const expectedHash = Buffer.from(
-					JSON.stringify({ sort: "new", community: "distributed-systems" }),
+					JSON.stringify({
+						sort: "new",
+						limit: 10,
+						community: "distributed-systems",
+					}),
 				).toString("base64");
 
 				expect(mockRedis.get).toHaveBeenCalledWith(
 					`feed:advanced:${expectedHash}`,
 				);
 				expect(mockPostRepository.getAdvancedFeed).not.toHaveBeenCalled();
-				expect(result).toEqual(fakeCachedPayload);
+				expect(result).toEqual({
+					...fakeCachedPayload,
+					posts: fakeCachedPayload.posts.map((post) => ({
+						...post,
+						currentUserVote: null,
+					})),
+				});
 			});
 
 			it("should interface with database persistence layers and populate cache instances on infrastructure misses", async () => {
@@ -159,11 +179,16 @@ describe("Feed Service Unit Test Suite", () => {
 				});
 
 				const expectedHash = Buffer.from(
-					JSON.stringify({ sort: "top", author: "staff-engineer-1" }),
+					JSON.stringify({
+						sort: "top",
+						limit: 10,
+						author: "staff-engineer-1",
+					}),
 				).toString("base64");
 
 				expect(mockPostRepository.getAdvancedFeed).toHaveBeenCalledWith({
 					sort: "top",
+					limit: 10,
 					author: "staff-engineer-1",
 				});
 				expect(mockRedis.set).toHaveBeenCalledWith(
@@ -171,7 +196,13 @@ describe("Feed Service Unit Test Suite", () => {
 					dbFeedResponse,
 					300,
 				);
-				expect(result).toEqual(dbFeedResponse);
+				expect(result).toEqual({
+					...dbFeedResponse,
+					posts: dbFeedResponse.posts.map((post) => ({
+						...post,
+						currentUserVote: null,
+					})),
+				});
 			});
 		});
 	});

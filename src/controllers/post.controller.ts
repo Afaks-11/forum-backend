@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../middlewares/asyncHandler.js";
+import { getAdvancedPostsFeed } from "../services/feed.service.js";
 import {
 	createPost,
-	getAdvancedPostsFeed,
 	getPostById,
 	getPostVoteMetrics,
 	type ModerationAction,
@@ -12,12 +12,12 @@ import {
 	softDeletePost,
 	updatePostFields,
 } from "../services/post.service.js";
+import { feedQuerySchema } from "../validators/feed.validator.js";
 import {
 	createPostSchema,
 	hideModerationBodySchema,
 	lockModerationBodySchema,
 	pinModerationBodySchema,
-	postFeedQuerySchema,
 	postIdParamSchema,
 	postSearchSchema,
 	postVoteParamSchema,
@@ -36,31 +36,27 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 	});
 });
 
+/**
+ * `GET /posts` and `GET /feed` are the same read.
+ *
+ * Both parse `feedQuerySchema`, call the one feed service, and emit the same
+ * `{ data, meta.nextCursor }` envelope. They used to disagree on all three.
+ */
 export const getActivePosts = asyncHandler(
 	async (req: Request, res: Response) => {
-		const parsedQueries = postFeedQuerySchema.parse(req.query);
-		const limitValue = parseInt(parsedQueries.limit || "10", 10);
+		const parsedQueries = feedQuerySchema.parse(req.query);
 		const viewerId = res.locals.user?.userId
 			? String(res.locals.user.userId)
 			: undefined;
 
-		const result = await getAdvancedPostsFeed(
-			{
-				sort: parsedQueries.sort,
-				...(parsedQueries.community
-					? { community: parsedQueries.community }
-					: {}),
-				...(parsedQueries.author ? { author: parsedQueries.author } : {}),
-				...(parsedQueries.cursor ? { cursor: parsedQueries.cursor } : {}),
-				limit: limitValue,
-			},
-			viewerId,
-		);
+		const result = await getAdvancedPostsFeed(parsedQueries, viewerId);
 
 		res.status(200).json({
 			success: true,
 			data: result.posts,
-			nextCursor: result.nextCursor,
+			meta: {
+				nextCursor: result.nextCursor,
+			},
 		});
 	},
 );
@@ -93,7 +89,7 @@ export const removePost = asyncHandler(async (req: Request, res: Response) => {
 	const { id } = postIdParamSchema.parse(req.params);
 	const userId = res.locals.user.userId;
 	await softDeletePost(id, userId);
-	res.status(204).json();
+	res.status(204).end();
 });
 
 export const savePost = asyncHandler(async (req: Request, res: Response) => {

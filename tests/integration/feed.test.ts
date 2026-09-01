@@ -68,10 +68,10 @@ describe("GET /api/v1/posts (Home Feed)", () => {
 		const res1 = await request.get("/api/v1/posts?limit=1");
 		expect(res1.status).toBe(200);
 		expect(res1.body.data.length).toBe(1);
-		expect(res1.body.nextCursor).toBeTruthy();
+		expect(res1.body.meta.nextCursor).toBeTruthy();
 
 		const res2 = await request.get(
-			`/api/v1/posts?limit=1&cursor=${res1.body.nextCursor}`,
+			`/api/v1/posts?limit=1&cursor=${res1.body.meta.nextCursor}`,
 		);
 		expect(res2.status).toBe(200);
 		expect(res2.body.data.length).toBe(1);
@@ -106,6 +106,6 @@ describe("GET /api/v1/posts (Home Feed)", () => {
 		const res = await request.get("/api/v1/posts");
 		expect(res.status).toBe(200);
 		expect(res.body.data).toEqual([]);
-		expect(res.body.nextCursor).toBeNull();
+		expect(res.body.meta.nextCursor).toBeNull();
 	});
 });

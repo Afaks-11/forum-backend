@@ -49,38 +49,6 @@ export const postIdParamSchema = z.object({
 	}),
 });
 
-export const postFeedQuerySchema = z.object({
-	sort: z
-		.enum(["new", "top", "hot", "controversial"])
-		.optional()
-		.default("new")
-		.openapi({
-			description: "OPTIONAL: Reorder feed items based on statistical metrics.",
-		}),
-	community: z.string().optional().openapi({
-		description:
-			"OPTIONAL: Filter down to specific community workspace by its slug value.",
-		example: "nodejs",
-	}),
-	author: z.string().optional().openapi({
-		description:
-			"OPTIONAL: Filter down to a single user account profile by their username string.",
-		example: "johndoe",
-	}),
-	cursor: z.uuid().optional().openapi({
-		description:
-			"OPTIONAL: Database primary key UUID token for high-performance keyset pagination offsets.",
-		example: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-	}),
-	// Left as a string because this schema validates the raw query string; the
-	// service layer owns the numeric coercion and clamping for feed pagination.
-	limit: z.string().optional().default("10").openapi({
-		description:
-			"OPTIONAL: Max records capacity count inside a single network response page.",
-		example: "10",
-	}),
-});
-
 export const postVoteParamSchema = z.object({
 	id: z.uuid("Invalid post UUID format"),
 });
@@ -109,13 +77,6 @@ export const postResponseSchema = z
 	})
 	.openapi("PostResponse");
 
-export const postFeedResponseSchema = z
-	.object({
-		posts: z.array(postResponseSchema),
-		nextCursor: z.uuid().nullable(),
-	})
-	.openapi("PostFeedResponse");
-
 export const postVotesDataSchema = z
 	.object({
 		upvoteCount: z.number().int(),
@@ -127,17 +88,6 @@ export const postVotesDataSchema = z
 
 export const communityIdParamSchema = z.object({
 	communityId: z.uuid("Invalid community identifier format"),
-});
-
-// Validates the already-coerced service-layer arguments rather than raw query
-// params, which is why `limit` is a number here and a string in
-// `postFeedQuerySchema`.
-export const getAdvancedPostsFeedSchema = z.object({
-	sort: z.enum(["new", "top", "hot", "controversial"]).optional(),
-	community: z.string().optional(),
-	author: z.string().optional(),
-	cursor: z.uuid().optional(),
-	limit: z.number().int().positive().optional(),
 });
 
 export const postSearchSchema = z.object({
@@ -182,8 +132,5 @@ export const hideModerationBodySchema = z.object({}).strict();
 export type PostSearchInput = z.infer<typeof postSearchSchema>;
 export type CreatePostInput = z.infer<typeof createPostSchema>;
 export type PostIdParamInput = z.infer<typeof postIdParamSchema>;
-export type updatePostInput = z.infer<typeof updatePostSchema>;
-export type communityIdParamInput = z.infer<typeof communityIdParamSchema>;
-export type getAdvancedPostsFeedInput = z.infer<
-	typeof getAdvancedPostsFeedSchema
->;
+export type UpdatePostInput = z.infer<typeof updatePostSchema>;
+export type CommunityIdParamInput = z.infer<typeof communityIdParamSchema>;

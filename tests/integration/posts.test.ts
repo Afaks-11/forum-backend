@@ -159,7 +159,7 @@ describe("GET /api/v1/posts", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.body.data.length).toBe(1);
-		expect(res.body.nextCursor).toBeDefined();
+		expect(res.body.meta.nextCursor).toBeDefined();
 	});
 
 	it("should filter by community slug", async () => {
@@ -177,7 +177,7 @@ describe("GET /api/v1/posts", () => {
 		const res = await request.get("/api/v1/posts");
 		expect(res.status).toBe(200);
 		expect(res.body.data).toEqual([]);
-		expect(res.body.nextCursor).toBeNull();
+		expect(res.body.meta.nextCursor).toBeNull();
 	});
 });
 
@@ -356,11 +356,14 @@ describe("POST /api/v1/posts/:id/save", () => {
 describe("POST /api/v1/posts/:id/pin", () => {
 	it("should pin post when user is moderator", async () => {
 		const mod = await createUser();
-		await db.user.update({
-			where: { id: mod.id },
-			data: { role: "MODERATOR" },
-		});
 		const community = await createCommunity(mod.id);
+		await db.membership.create({
+			data: {
+				userId: mod.id,
+				communityId: community.id,
+				role: "MODERATOR",
+			},
+		});
 		const post = await createPost(mod.id, community.id);
 		const token = await generateAccessToken(mod.id);
 
@@ -406,12 +409,15 @@ describe("POST /api/v1/posts/:id/lock", () => {
 
 	it("should lock post when user is moderator", async () => {
 		const mod = await createUser();
-		await db.user.update({
-			where: { id: mod.id },
-			data: { role: "MODERATOR" },
-		});
 		const author = await createUser();
 		const community = await createCommunity(mod.id);
+		await db.membership.create({
+			data: {
+				userId: mod.id,
+				communityId: community.id,
+				role: "MODERATOR",
+			},
+		});
 		const post = await createPost(author.id, community.id);
 		const token = await generateAccessToken(mod.id);
 

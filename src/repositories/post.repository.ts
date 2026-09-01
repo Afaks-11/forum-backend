@@ -2,7 +2,7 @@ import type { PrismaClient } from "../generated/prisma/client.js";
 import { Prisma } from "../generated/prisma/client.js";
 import type {
 	CreatePostInput,
-	updatePostInput,
+	UpdatePostInput,
 } from "../validators/post.validator.js";
 
 /**
@@ -10,7 +10,7 @@ import type {
  * recommendation paths cannot drift apart. Vote tallies come from the
  * denormalized scalar columns on `posts`, so only comments need aggregating.
  */
-const postListInclude = {
+export const postListInclude = {
 	author: { select: { username: true } },
 	community: { select: { name: true, slug: true } },
 	_count: { select: { comments: true } },
@@ -126,7 +126,7 @@ export class PostRepository {
 		return new Map(votes.map((vote) => [vote.postId, vote.type]));
 	}
 
-	async update(id: string, data: updatePostInput) {
+	async update(id: string, data: UpdatePostInput) {
 		return await this.prisma.post.update({
 			where: { id },
 			data: {
@@ -203,14 +203,29 @@ export class PostRepository {
 		// identically to them rather than approximating with raw vote volume.
 		let orderByClause:
 			| Prisma.PostOrderByWithRelationInput
-			| Prisma.PostOrderByWithRelationInput[] = { createdAt: "desc" };
+			| Prisma.PostOrderByWithRelationInput[] = [
+			{ createdAt: "desc" },
+			{ id: "desc" },
+		];
 
 		if (filters.sort === "top") {
-			orderByClause = [{ score: "desc" }, { createdAt: "desc" }];
+			orderByClause = [
+				{ score: "desc" },
+				{ createdAt: "desc" },
+				{ id: "desc" },
+			];
 		} else if (filters.sort === "hot") {
-			orderByClause = [{ hotScore: "desc" }, { createdAt: "desc" }];
+			orderByClause = [
+				{ hotScore: "desc" },
+				{ createdAt: "desc" },
+				{ id: "desc" },
+			];
 		} else if (filters.sort === "controversial") {
-			orderByClause = [{ controversialScore: "desc" }, { createdAt: "desc" }];
+			orderByClause = [
+				{ controversialScore: "desc" },
+				{ createdAt: "desc" },
+				{ id: "desc" },
+			];
 		}
 
 		const posts = await this.prisma.post.findMany({
@@ -232,35 +247,57 @@ export class PostRepository {
 		return { posts, nextCursor };
 	}
 
-	/**
-	 * Case-insensitive keyword search over active post titles and bodies,
-	 * cursor-paginated in the same shape as the feed.
-	 */
+	/** PostgreSQL full-text search ordered by relevance with a stable ID tie-breaker. */
 	async searchPosts(filters: {
 		query: string;
 		limit: number;
 		cursor?: string | null;
 	}) {
 		const take = filters.limit || 10;
+		const cursorCondition = filters.cursor
+			? Prisma.sql`WHERE (ranked.rank, ranked.id) < (
+				SELECT cursor_rank.rank, cursor_rank.id
+				FROM ranked cursor_rank
+				WHERE cursor_rank.id = ${filters.cursor}
+			)`
+			: Prisma.empty;
+		const rows = await this.prisma.$queryRaw<
+			{ id: string; rank: number; createdAt: Date }[]
+		>(Prisma.sql`
+			WITH ranked AS (
+				SELECT p.id, p.created_at AS "createdAt",
+					ts_rank(
+						COALESCE(
+							p.search_vector,
+							setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
+							setweight(to_tsvector('english', coalesce(p.content, '')), 'B')
+						),
+						websearch_to_tsquery('english', ${filters.query})
+					) AS rank
+				FROM posts p
+				WHERE p.deleted_at IS NULL
+					AND COALESCE(
+						p.search_vector,
+						setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
+						setweight(to_tsvector('english', coalesce(p.content, '')), 'B')
+					) @@ websearch_to_tsquery('english', ${filters.query})
+			)
+			SELECT ranked.id, ranked."createdAt", ranked.rank
+			FROM ranked
+			${cursorCondition}
+			ORDER BY ranked.rank DESC, ranked.id DESC
+			LIMIT ${take + 1}
+		`);
 
-		const whereClause: Prisma.PostWhereInput = {
-			deletedAt: null,
-			OR: [
-				{ title: { contains: filters.query, mode: "insensitive" } },
-				{ content: { contains: filters.query, mode: "insensitive" } },
-			],
-		};
+		const hasNextPage = rows.length > take;
+		if (hasNextPage) rows.pop();
 
-		const posts = await this.prisma.post.findMany({
-			where: whereClause,
-			take: take + 1,
-			include: postListInclude,
-			orderBy: { createdAt: "desc" },
-			...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
-		});
-
-		const hasNextPage = posts.length > take;
-		if (hasNextPage) posts.pop();
+		const ids = rows.map((row) => row.id);
+		const hydrated = await this.findManyByIds(ids);
+		const byId = new Map(hydrated.map((post) => [post.id, post]));
+		const posts = ids
+			.map((id) => byId.get(id))
+			.filter((post): post is NonNullable<typeof post> => post !== undefined);
 
 		const lastPost = posts[posts.length - 1];
 		const nextCursor = hasNextPage && lastPost ? lastPost.id : null;

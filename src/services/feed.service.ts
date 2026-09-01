@@ -1,3 +1,4 @@
+import type { VoteType } from "../generated/prisma/client.js";
 import { postRepository } from "../repositories/index.js";
 import { redis } from "../utils/redis.js";
 
@@ -14,14 +15,50 @@ type AdvancedFeedPayload = Awaited<
 >;
 
 /**
- * Returns a cursor-paginated feed sorted by new, top, hot, or controversial.
+ * Resolves the caller's own vote for a page of posts in one query and folds it
+ * into each row.
  *
- * Hot and controversial without filters hit Redis sorted sets (ZSETs) built by
- * the ranking worker; all other paths cache the repository result. The ZSET
- * path uses offset pagination because Redis ZREVRANGE returns by rank, not by
- * cursor.
+ * Pages are cached without viewer context so every reader shares one entry; the
+ * per-viewer field is layered on afterwards, on both the hit and miss paths.
+ * Doing it here rather than in the repository keeps the cached payload
+ * viewer-agnostic.
  */
-export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
+const attachViewerVotes = async <T extends { id: string }>(
+	posts: T[],
+	viewerId?: string,
+): Promise<(T & { currentUserVote: VoteType | null })[]> => {
+	if (!viewerId || posts.length === 0) {
+		return posts.map((post) => ({ ...post, currentUserVote: null }));
+	}
+
+	const votes = await postRepository.findViewerVotes(
+		posts.map((post) => post.id),
+		viewerId,
+	);
+
+	return posts.map((post) => ({
+		...post,
+		currentUserVote: votes.get(post.id) ?? null,
+	}));
+};
+
+/**
+ * The single feed implementation, serving both `GET /feed` and `GET /posts`.
+ *
+ * There used to be two functions of this name — one here with the Redis fast
+ * path, one in `post.service` with viewer-vote folding — writing to the same
+ * `feed:advanced:` cache namespace with different clamping and envelopes. This
+ * is the merge of both.
+ *
+ * Unfiltered `hot`/`controversial` requests read the sorted sets the ranking
+ * worker maintains, which is why their cursor is a rank offset rather than a
+ * keyset UUID: Redis addresses ZSET members by rank. Every other path caches the
+ * repository's keyset page.
+ */
+export const getAdvancedPostsFeed = async (
+	filters: AdvancedFeedFilters,
+	viewerId?: string,
+) => {
 	const targetSort = filters.sort ?? "new";
 	const targetLimit = filters.limit ?? 10;
 
@@ -32,7 +69,12 @@ export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 	) {
 		const rawRedisClient = redis.getClient();
 		const zsetKey = `feed:global:${targetSort}`;
-		const startOffset = filters.cursor ? parseInt(filters.cursor, 10) : 0;
+		// The schema guarantees a numeric-or-UUID cursor; a UUID reaching this
+		// ranked path means the client carried a keyset cursor across a sort
+		// change, so the page restarts at rank 0 instead of producing NaN offsets.
+		const parsedOffset = filters.cursor ? Number(filters.cursor) : 0;
+		const startOffset =
+			Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 		const stopOffset = startOffset + targetLimit - 1;
 
 		const rankedIds: string[] = await rawRedisClient.zrevrange(
@@ -62,19 +104,13 @@ export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 				checkNextIds.length > 0 ? (startOffset + targetLimit).toString() : null;
 
 			return {
-				posts: orderedPosts,
+				posts: await attachViewerVotes(orderedPosts, viewerId),
 				nextCursor,
 			};
 		}
 	}
 
-	// Standard Chronological Cache Paths (New / Top / Context Filters)
-	const filterHash = Buffer.from(JSON.stringify(filters)).toString("base64");
-	const cacheKey = `feed:advanced:${filterHash}`;
-
-	const cachedFeed = await redis.get<AdvancedFeedPayload>(cacheKey);
-	if (cachedFeed) return cachedFeed;
-
+	// Standard keyset paths (new / top / any contextual filter).
 	// Rebuilt key by key instead of spread: the incoming type permits explicit
 	// `undefined`, which `exactOptionalPropertyTypes` will not accept downstream.
 	const repoFilters: {
@@ -83,17 +119,27 @@ export const getAdvancedPostsFeed = async (filters: AdvancedFeedFilters) => {
 		author?: string;
 		cursor?: string;
 		limit?: number;
-	} = {};
+	} = { sort: targetSort, limit: targetLimit };
 
-	if (filters.sort) repoFilters.sort = filters.sort;
 	if (filters.community) repoFilters.community = filters.community;
 	if (filters.author) repoFilters.author = filters.author;
 	if (filters.cursor) repoFilters.cursor = filters.cursor;
-	if (filters.limit) repoFilters.limit = filters.limit;
 
-	const feed = await postRepository.getAdvancedFeed(repoFilters);
+	// The filter set is hashed into the key so each sort/community/cursor
+	// combination caches independently instead of overwriting one another.
+	const filterHash = Buffer.from(JSON.stringify(repoFilters)).toString(
+		"base64",
+	);
+	const cacheKey = `feed:advanced:${filterHash}`;
 
-	await redis.set(cacheKey, feed, 300);
+	let feed = await redis.get<AdvancedFeedPayload>(cacheKey);
+	if (!feed) {
+		feed = await postRepository.getAdvancedFeed(repoFilters);
+		await redis.set(cacheKey, feed, 300);
+	}
 
-	return feed;
+	return {
+		...feed,
+		posts: await attachViewerVotes(feed.posts, viewerId),
+	};
 };

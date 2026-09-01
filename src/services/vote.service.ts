@@ -4,21 +4,8 @@ import {
 	isRetryableVoteConflict,
 	type VoteResult,
 } from "../repositories/vote.repository.js";
-import { redis } from "../utils/redis.js";
+import { invalidatePostCaches } from "../utils/postCache.js";
 import type { CastVoteInput } from "../validators/vote.validator.js";
-
-/**
- * Drops the cached vote metrics for a post after its tally changes.
- *
- * `getPostVoteMetrics` caches under `post:<id>:vote_metrics:<viewerId>` — one
- * entry per viewer, because the payload carries that viewer's own vote. A
- * single `del` would therefore only clear the caster's copy and leave every
- * other reader on a stale score for the rest of the 60s TTL, so the whole
- * per-post family is swept.
- */
-const invalidateVoteMetrics = async (postId: string): Promise<void> => {
-	await redis.delPattern(`post:${postId}:vote_metrics:*`);
-};
 
 /**
  * Applies a vote as a three-way toggle: recasting the same type retracts it,
@@ -42,12 +29,37 @@ export const castVote = async (
 		result = await voteRepository.applyVote(userId, data.postId, data.type);
 	} catch (error) {
 		// Two voters racing on their first vote for the same post: one insert
-		// wins, the loser retries and now sees the existing row, so the toggle
-		// resolves normally instead of surfacing a constraint error.
+		// wins, the loser retries and now sees the existing row.
 		if (!isRetryableVoteConflict(error)) throw error;
-		result = await voteRepository.applyVote(userId, data.postId, data.type);
+
+		try {
+			// `preserveIntent` matters here. On a plain retry the losing insert has
+			// already landed, so the toggle would read "same type already present"
+			// and delete it — silently discarding a vote the user never retracted.
+			// The flag keeps the caller's original intent instead.
+			result = await voteRepository.applyVote(
+				userId,
+				data.postId,
+				data.type,
+				true,
+			);
+		} catch (retryError) {
+			// Under three-way contention the retry can lose its own race. The
+			// predicate is reapplied so that surfaces as a 409 the client can act
+			// on rather than an unmapped 500.
+			if (!isRetryableVoteConflict(retryError)) throw retryError;
+
+			throw new AppError(
+				"Vote could not be recorded due to concurrent activity. Please retry.",
+				409,
+			);
+		}
 	}
 
-	await invalidateVoteMetrics(data.postId);
+	// The post detail payload embeds the same tallies this write just moved, so
+	// both its cache entry and the vote tally entry are dropped together —
+	// otherwise `GET /posts/:id` reported a stale score for up to an hour after a
+	// vote that `GET /posts/:id/votes` already reflected.
+	await invalidatePostCaches(data.postId);
 	return result;
 };

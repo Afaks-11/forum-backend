@@ -46,11 +46,19 @@ export class VoteRepository {
 	 * surfaces as P2002 rather than a duplicate row. The caller retries that
 	 * case, at which point the existing vote is visible and the toggle resolves
 	 * normally.
+	 *
+	 * `preserveIntent` exists for exactly that retry. The toggle is not
+	 * intent-preserving by construction: on the second attempt the caller's own
+	 * lost insert is now visible, so plain toggle semantics read "same type
+	 * already present" and delete it — turning a double-click into a discarded
+	 * vote the user never retracted. With the flag set, an existing row of the
+	 * requested type is treated as the desired end state and left alone.
 	 */
 	async applyVote(
 		userId: string,
 		postId: string,
 		type: VoteType,
+		preserveIntent = false,
 	): Promise<VoteResult> {
 		return await this.prisma.$transaction(async (tx) => {
 			const existing = await tx.vote.findUnique({
@@ -64,6 +72,23 @@ export class VoteRepository {
 				await tx.vote.create({ data: { userId, postId, type } });
 				action = "CREATED";
 			} else if (existing.type === type) {
+				if (preserveIntent) {
+					// Already in the requested state: report it without moving
+					// counters, since the winning insert already accounted for them.
+					const current = await tx.post.findUniqueOrThrow({
+						where: { id: postId },
+						select: { upvoteCount: true, downvoteCount: true, score: true },
+					});
+
+					return {
+						action: "CREATED",
+						score: current.score,
+						upvoteCount: current.upvoteCount,
+						downvoteCount: current.downvoteCount,
+						currentUserVote: type,
+					};
+				}
+
 				await tx.vote.delete({ where: { id: existing.id } });
 				action = "REMOVED";
 			} else {
