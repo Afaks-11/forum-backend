@@ -39,17 +39,30 @@ export class CommentRepository {
 	/**
 	 * Retrieve all active comments for a post, ordered chronologically
 	 */
-	async findManyActiveByPostId(postId: string) {
-		return await this.prisma.comment.findMany({
+	async findManyByPostId(
+		postId: string,
+		options: { limit: number; cursor?: string } = { limit: 50 },
+	) {
+		const comments = await this.prisma.comment.findMany({
 			where: {
 				postId,
-				deletedAt: null,
 			},
+			take: options.limit + 1,
+			...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
 			include: {
 				author: { select: { username: true, id: true } },
 			},
-			orderBy: { createdAt: "asc" },
+			orderBy: [{ createdAt: "asc" }, { id: "asc" }],
 		});
+
+		const hasNextPage = comments.length > options.limit;
+		if (hasNextPage) comments.pop();
+
+		const lastComment = comments[comments.length - 1];
+		return {
+			comments,
+			nextCursor: hasNextPage && lastComment ? lastComment.id : null,
+		};
 	}
 
 	/**
@@ -98,33 +111,13 @@ export class CommentRepository {
 	}
 
 	/**
-	 * Retrieve saved association details
-	 */
-	async findSavedRelation(userId: string, commentId: string) {
-		return await this.prisma.savedComment.findUnique({
-			where: { userId_commentId: { userId, commentId } },
-		});
-	}
-
-	/**
 	 * Register a user-saved comment bookmark
 	 */
-	async createSavedRelation(userId: string, commentId: string) {
-		return await this.prisma.savedComment.create({
-			data: { userId, commentId },
-		});
-	}
-
-	/**
-	 * Log a community standards report against a comment
-	 */
-	async createCommentReport(data: {
-		commentId: string;
-		reporterId: string;
-		reason: string;
-	}) {
-		return await this.prisma.commentReport.create({
-			data,
+	async saveComment(userId: string, commentId: string) {
+		return await this.prisma.savedComment.upsert({
+			where: { userId_commentId: { userId, commentId } },
+			update: {},
+			create: { userId, commentId },
 		});
 	}
 }

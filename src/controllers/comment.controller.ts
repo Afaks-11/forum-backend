@@ -9,7 +9,11 @@ import {
 } from "../services/comment.service.js";
 import {
 	commentIdParamSchema,
+	commentListQuerySchema,
+	commentPostIdParamSchema,
+	commentReasonBodySchema,
 	createCommentSchema,
+	emptyCommentActionBodySchema,
 	updateCommentSchema,
 } from "../validators/comment.validator.js";
 
@@ -24,11 +28,16 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getComments = asyncHandler(async (req: Request, res: Response) => {
-	const postId = req.params.postId as string;
-	const postComment = await getPostComments(postId);
+	const { postId } = commentPostIdParamSchema.parse(req.params);
+	const query = commentListQuerySchema.parse(req.query);
+	const result = await getPostComments(postId, {
+		limit: query.limit,
+		...(query.cursor ? { cursor: query.cursor } : {}),
+	});
 	res.status(200).json({
 		success: true,
-		data: postComment,
+		data: result.comments,
+		meta: { nextCursor: result.nextCursor },
 	});
 });
 
@@ -63,7 +72,12 @@ export const handleCommentAction = (
 	return asyncHandler(async (req: Request, res: Response) => {
 		const { id } = commentIdParamSchema.parse(req.params);
 		const userId = res.locals.user.userId;
-		const reasonText = req.body?.reason ? String(req.body.reason) : undefined;
+		let reasonText: string | undefined;
+		if (actionType === "REPORT" || actionType === "REMOVE") {
+			reasonText = commentReasonBodySchema.parse(req.body ?? {}).reason;
+		} else {
+			emptyCommentActionBodySchema.parse(req.body ?? {});
+		}
 
 		await modifyCommentState(id, userId, actionType, reasonText);
 		res.status(200).json({

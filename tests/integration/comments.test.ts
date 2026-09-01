@@ -155,11 +155,12 @@ describe("GET /api/v1/comments/post/:postId", () => {
 		expect(Array.isArray(res.body.data)).toBe(true);
 	});
 
-	it("should return 401 without auth", async () => {
-		const res = await request.get(
-			`/api/v1/comments/post/${crypto.randomUUID()}`,
-		);
-		expect(res.status).toBe(401);
+	it("should allow anonymous comment reads", async () => {
+		const user = await createUser();
+		const community = await createCommunity(user.id);
+		const post = await createPost(user.id, community.id);
+		const res = await request.get(`/api/v1/comments/post/${post.id}`);
+		expect(res.status).toBe(200);
 	});
 });
 

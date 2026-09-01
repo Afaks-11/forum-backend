@@ -35,6 +35,23 @@ export const commentPostIdParamSchema = z.object({
 	}),
 });
 
+export const commentListQuerySchema = z.object({
+	limit: z
+		.string()
+		.optional()
+		.transform((value) => (value ? Number.parseInt(value, 10) : 50))
+		.pipe(z.number().int().min(1).max(100)),
+	cursor: z.uuid("Invalid comment cursor format").optional(),
+});
+
+export const commentReasonBodySchema = z
+	.object({
+		reason: z.string().trim().min(1).max(1000).optional(),
+	})
+	.strict();
+
+export const emptyCommentActionBodySchema = z.object({}).strict();
+
 export const commentResponseSchema = z
 	.object({
 		id: z.uuid(),
@@ -43,7 +60,7 @@ export const commentResponseSchema = z
 		parentId: z.uuid().nullable(),
 		authorId: z.uuid(),
 		isLocked: z.boolean(),
-		isRemoved: z.boolean(),
+		deletedAt: z.date().nullable(),
 		createdAt: z.date(),
 		updatedAt: z.date(),
 		author: z
@@ -56,3 +73,4 @@ export const commentResponseSchema = z
 	.openapi("CommentResponse");
 
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+export type CommentListQueryInput = z.infer<typeof commentListQuerySchema>;

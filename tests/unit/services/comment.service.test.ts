@@ -4,21 +4,34 @@ import { AppError } from "../../../src/errors/AppError.js";
 // Module Level Repository and Core Subsystem Mocks
 const mockPostRepository = {
 	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findUniqueById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
 const mockCommentRepository = {
 	create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findActiveById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	findManyActiveByPostId: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findManyByPostId: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateFields: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	softDelete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateLockState: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	removeByModerator: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	findSavedRelation: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	createSavedRelation: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	createCommentReport: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	saveComment: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
+
+const mockCommunityRepository = {
+	findModeratorMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
+const mockUserRepository = {
+	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
+const mockReportRepository = {
+	createComment: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
+const mockRedis = { del: jest.fn<(...args: unknown[]) => Promise<unknown>>() };
 
 const mockEmit = jest.fn<(...args: unknown[]) => unknown>();
 const mockTo = jest.fn<(...args: unknown[]) => unknown>();
@@ -35,6 +48,12 @@ const mockSendInternalNotification =
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	postRepository: mockPostRepository,
 	commentRepository: mockCommentRepository,
+	communityRepository: mockCommunityRepository,
+	userRepository: mockUserRepository,
+	reportRepository: mockReportRepository,
+}));
+await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
+	redis: mockRedis,
 }));
 await jest.unstable_mockModule("../../../src/socket/socket.server.js", () => ({
 	getIO: mockGetIO,
@@ -100,6 +119,7 @@ describe("Comment Service Unit Test Suite", () => {
 				recipientId: "usr_owner",
 				senderId: "usr_123",
 				type: "COMMENT",
+				dedupeKey: "cmnt_789",
 				title: "New comment on your post",
 				content: 'Someone commented: "Great architectural breakdown!..."',
 				link: "/posts/post_123",
@@ -154,6 +174,7 @@ describe("Comment Service Unit Test Suite", () => {
 				recipientId: "usr_parent",
 				senderId: "usr_123",
 				type: "REPLY",
+				dedupeKey: "cmnt_789",
 				title: "New reply to your comment",
 				content: 'Someone replied: "Agreed with this point...."',
 				link: "/posts/post_123",
@@ -242,21 +263,22 @@ describe("Comment Service Unit Test Suite", () => {
 
 	describe("getPostComments", () => {
 		it("Happy Path: should retrieve chronologically ordered active records tied to a target post identification footprint", async () => {
-			mockCommentRepository.findManyActiveByPostId.mockReset();
+			mockPostRepository.findById.mockResolvedValue(createFakePostPayload());
+			mockCommentRepository.findManyByPostId.mockReset();
 			const outputBuffer = [
 				createFakeComment(),
 				createFakeComment({ id: "cmnt_790" }),
 			];
-			mockCommentRepository.findManyActiveByPostId.mockResolvedValue(
-				outputBuffer,
-			);
+			const page = { comments: outputBuffer, nextCursor: null };
+			mockCommentRepository.findManyByPostId.mockResolvedValue(page);
 
-			const result = await getPostComments("post_123");
+			const result = await getPostComments("post_123", { limit: 50 });
 
-			expect(mockCommentRepository.findManyActiveByPostId).toHaveBeenCalledWith(
+			expect(mockCommentRepository.findManyByPostId).toHaveBeenCalledWith(
 				"post_123",
+				{ limit: 50 },
 			);
-			expect(result).toEqual(outputBuffer);
+			expect(result).toEqual(page);
 		});
 	});
 
@@ -359,6 +381,10 @@ describe("Comment Service Unit Test Suite", () => {
 				mockCommentRepository.findById.mockResolvedValue(
 					createFakeComment({ isLocked: false }),
 				);
+				mockPostRepository.findUniqueById.mockResolvedValue(
+					createFakePostPayload(),
+				);
+				mockUserRepository.findById.mockResolvedValue({ role: "ADMIN" });
 
 				const response = await modifyCommentState(
 					"cmnt_789",
@@ -383,6 +409,10 @@ describe("Comment Service Unit Test Suite", () => {
 				mockCommentRepository.findById.mockResolvedValue(
 					createFakeComment({ authorId: "usr_author", postId: "post_123" }),
 				);
+				mockPostRepository.findUniqueById.mockResolvedValue(
+					createFakePostPayload(),
+				);
+				mockUserRepository.findById.mockResolvedValue({ role: "ADMIN" });
 
 				const response = await modifyCommentState(
 					"cmnt_789",
@@ -398,6 +428,7 @@ describe("Comment Service Unit Test Suite", () => {
 					recipientId: "usr_author",
 					senderId: "usr_mod",
 					type: "MOD_ACTION",
+					dedupeKey: "comment-remove:cmnt_789",
 					title: "Comment removed by moderation guidelines",
 					content:
 						"Your comment was removed for violating community code standards. Reason: Inappropriate language",
@@ -413,6 +444,10 @@ describe("Comment Service Unit Test Suite", () => {
 				mockCommentRepository.findById.mockResolvedValue(
 					createFakeComment({ authorId: "usr_author", postId: "post_123" }),
 				);
+				mockPostRepository.findUniqueById.mockResolvedValue(
+					createFakePostPayload(),
+				);
+				mockUserRepository.findById.mockResolvedValue({ role: "ADMIN" });
 
 				await modifyCommentState("cmnt_789", "usr_mod", "REMOVE");
 
@@ -428,7 +463,7 @@ describe("Comment Service Unit Test Suite", () => {
 		describe("Action: REPORT", () => {
 			it("Happy Path: should process and structure inbound user dispute tickets via internal compliance structures", async () => {
 				mockCommentRepository.findById.mockReset();
-				mockCommentRepository.createCommentReport.mockReset();
+				mockReportRepository.createComment.mockReset();
 
 				mockCommentRepository.findById.mockResolvedValue(createFakeComment());
 
@@ -439,38 +474,36 @@ describe("Comment Service Unit Test Suite", () => {
 					"Harassment",
 				);
 
-				expect(mockCommentRepository.createCommentReport).toHaveBeenCalledWith({
-					commentId: "cmnt_789",
-					reporterId: "usr_reporter",
-					reason: "Harassment",
-				});
+				expect(mockReportRepository.createComment).toHaveBeenCalledWith(
+					"cmnt_789",
+					"usr_reporter",
+					"Harassment",
+				);
 				expect(response).toEqual({ success: true });
 			});
 
 			it("Edge Case: should populate boilerplate metadata when user claims are submitted without explanation arrays", async () => {
 				mockCommentRepository.findById.mockReset();
-				mockCommentRepository.createCommentReport.mockReset();
+				mockReportRepository.createComment.mockReset();
 
 				mockCommentRepository.findById.mockResolvedValue(createFakeComment());
 
 				await modifyCommentState("cmnt_789", "usr_reporter", "REPORT");
 
-				expect(mockCommentRepository.createCommentReport).toHaveBeenCalledWith({
-					commentId: "cmnt_789",
-					reporterId: "usr_reporter",
-					reason: "Violated community standards guidelines.",
-				});
+				expect(mockReportRepository.createComment).toHaveBeenCalledWith(
+					"cmnt_789",
+					"usr_reporter",
+					"Violated community standards guidelines.",
+				);
 			});
 		});
 
 		describe("Action: SAVE", () => {
-			it("Happy Path (New Bookmark): should record relationship pairings if data arrays return unlinked records", async () => {
+			it("Happy Path: should upsert the bookmark idempotently", async () => {
 				mockCommentRepository.findById.mockReset();
-				mockCommentRepository.findSavedRelation.mockReset();
-				mockCommentRepository.createSavedRelation.mockReset();
+				mockCommentRepository.saveComment.mockReset();
 
 				mockCommentRepository.findById.mockResolvedValue(createFakeComment());
-				mockCommentRepository.findSavedRelation.mockResolvedValue(null);
 
 				const response = await modifyCommentState(
 					"cmnt_789",
@@ -478,37 +511,10 @@ describe("Comment Service Unit Test Suite", () => {
 					"SAVE",
 				);
 
-				expect(mockCommentRepository.findSavedRelation).toHaveBeenCalledWith(
+				expect(mockCommentRepository.saveComment).toHaveBeenCalledWith(
 					"usr_123",
 					"cmnt_789",
 				);
-				expect(mockCommentRepository.createSavedRelation).toHaveBeenCalledWith(
-					"usr_123",
-					"cmnt_789",
-				);
-				expect(response).toEqual({ success: true });
-			});
-
-			it("Happy Path (Duplicate Bookmark): should short-circuit smoothly without duplicating relational rows", async () => {
-				mockCommentRepository.findById.mockReset();
-				mockCommentRepository.findSavedRelation.mockReset();
-				mockCommentRepository.createSavedRelation.mockReset();
-
-				mockCommentRepository.findById.mockResolvedValue(createFakeComment());
-				mockCommentRepository.findSavedRelation.mockResolvedValue({
-					userId: "usr_123",
-					commentId: "cmnt_789",
-				});
-
-				const response = await modifyCommentState(
-					"cmnt_789",
-					"usr_123",
-					"SAVE",
-				);
-
-				expect(
-					mockCommentRepository.createSavedRelation,
-				).not.toHaveBeenCalled();
 				expect(response).toEqual({ success: true });
 			});
 		});
