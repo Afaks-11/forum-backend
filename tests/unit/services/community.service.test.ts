@@ -8,7 +8,8 @@ const mockCommunityRepository = {
 	findByNameOrSlug: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	createWithModerator: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findBySlug: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	findAllWithMemberCount: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findAllCommunitiesWithMemberCount:
+		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findModeratorMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	upsertMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -19,11 +20,18 @@ const mockCommunityRepository = {
 	updateDescription: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateRules: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateMediaAsset: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	delete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	softDelete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	countModerators: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateMembershipRole: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	createMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	promoteMembership: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	demoteModeratorIfAnotherExists:
+		jest.fn<(...args: unknown[]) => Promise<number>>(),
 	searchCommunities: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
+const mockUserRepository = {
+	findByUsername: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
 const mockRedis = {
@@ -32,29 +40,15 @@ const mockRedis = {
 	del: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
-const mockPrisma = {
-	community: {
-		findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	},
-	user: {
-		findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	},
-	membership: {
-		findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	},
-};
-
 const mockSendInternalNotification =
 	jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	communityRepository: mockCommunityRepository,
+	userRepository: mockUserRepository,
 }));
 await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
 	redis: mockRedis,
-}));
-await jest.unstable_mockModule("../../../src/utils/prisma.js", () => ({
-	prisma: mockPrisma,
 }));
 await jest.unstable_mockModule(
 	"../../../src/services/notification.service.js",
@@ -140,7 +134,7 @@ describe("Community Service Unit Test Suite", () => {
 
 			expect(mockRedis.get).toHaveBeenCalledWith("communities:list");
 			expect(
-				mockCommunityRepository.findAllWithMemberCount,
+				mockCommunityRepository.findAllCommunitiesWithMemberCount,
 			).not.toHaveBeenCalled();
 			expect(result).toEqual(cachedList);
 		});
@@ -148,11 +142,15 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path (Cache Miss): should fetch data from repository and store in redis cache on miss", async () => {
 			const dbList = [{ ...createFakeCommunity(), _count: { members: 5 } }];
 			mockRedis.get.mockResolvedValue(null);
-			mockCommunityRepository.findAllWithMemberCount.mockResolvedValue(dbList);
+			mockCommunityRepository.findAllCommunitiesWithMemberCount.mockResolvedValue(
+				dbList,
+			);
 
 			const result = await getAllCommunitiesList();
 
-			expect(mockCommunityRepository.findAllWithMemberCount).toHaveBeenCalled();
+			expect(
+				mockCommunityRepository.findAllCommunitiesWithMemberCount,
+			).toHaveBeenCalled();
 			expect(mockRedis.set).toHaveBeenCalledWith(
 				"communities:list",
 				dbList,
@@ -166,6 +164,9 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path (Cache Hit): should fetch from redis and bypass database", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockCommunityRepository.findMembership.mockResolvedValue({
+				role: MembershipRole.MEMBER,
+			});
 
 			const result = await getCommunityDetails("typescript");
 
@@ -223,6 +224,9 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path: should remove active membership association and flush cache keys", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockCommunityRepository.findMembership.mockResolvedValue({
+				role: MembershipRole.MEMBER,
+			});
 
 			await leaveCommunityAction("usr_999", "typescript");
 
@@ -412,10 +416,13 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path: should delete community and wipe matching cache indexes if sender matches creator", async () => {
 			const community = createFakeCommunity({ creatorId: "usr_creator" });
 			mockRedis.get.mockResolvedValue(community);
+			mockCommunityRepository.findPostsByCommunityId.mockResolvedValue([]);
 
 			await deleteCommunityAction("typescript", "usr_creator");
 
-			expect(mockCommunityRepository.delete).toHaveBeenCalledWith(community.id);
+			expect(mockCommunityRepository.softDelete).toHaveBeenCalledWith(
+				community.id,
+			);
 			expect(mockRedis.del).toHaveBeenCalledWith("community:slug:typescript");
 			expect(mockRedis.del).toHaveBeenCalledWith("communities:list");
 			expect(mockRedis.del).toHaveBeenCalledWith("feed:community:typescript");
@@ -438,11 +445,15 @@ describe("Community Service Unit Test Suite", () => {
 
 	describe("inviteUserToCommunitySpace", () => {
 		it("Happy Path: should delegate task to notification queue system when targets exist", async () => {
-			mockPrisma.community.findUnique.mockResolvedValue({
+			mockCommunityRepository.findBySlug.mockResolvedValue({
+				id: "community_1",
 				name: "TypeScript",
 				slug: "typescript",
 			});
-			mockPrisma.user.findUnique.mockResolvedValue({ id: "usr_target" });
+			mockCommunityRepository.findMembership.mockResolvedValue({
+				role: "MEMBER",
+			});
+			mockUserRepository.findByUsername.mockResolvedValue({ id: "usr_target" });
 			mockSendInternalNotification.mockResolvedValue({ id: "job_1" });
 
 			const result = await inviteUserToCommunitySpace(
@@ -451,16 +462,17 @@ describe("Community Service Unit Test Suite", () => {
 				"usr_sender",
 			);
 
-			expect(mockPrisma.community.findUnique).toHaveBeenCalledWith({
-				where: { slug: "typescript" },
-			});
-			expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-				where: { username: "targetuser" },
-			});
+			expect(mockCommunityRepository.findBySlug).toHaveBeenCalledWith(
+				"typescript",
+			);
+			expect(mockUserRepository.findByUsername).toHaveBeenCalledWith(
+				"targetuser",
+			);
 			expect(mockSendInternalNotification).toHaveBeenCalledWith({
 				recipientId: "usr_target",
 				senderId: "usr_sender",
 				type: "COMMUNITY_INVITE",
+				dedupeKey: "community_1:usr_sender",
 				title: "Invitation to join r/TypeScript",
 				content: expect.any(String),
 				link: "/communities/typescript",
@@ -469,7 +481,7 @@ describe("Community Service Unit Test Suite", () => {
 		});
 
 		it("Edge Case: should throw 404 if the target workspace does not exist", async () => {
-			mockPrisma.community.findUnique.mockResolvedValue(null);
+			mockCommunityRepository.findBySlug.mockResolvedValue(null);
 
 			await expect(
 				inviteUserToCommunitySpace("missing", "targetuser", "usr_sender"),
@@ -477,11 +489,15 @@ describe("Community Service Unit Test Suite", () => {
 		});
 
 		it("Edge Case: should throw 404 if the target recipient username does not exist", async () => {
-			mockPrisma.community.findUnique.mockResolvedValue({
+			mockCommunityRepository.findBySlug.mockResolvedValue({
+				id: "community_1",
 				name: "TypeScript",
 				slug: "typescript",
 			});
-			mockPrisma.user.findUnique.mockResolvedValue(null);
+			mockCommunityRepository.findMembership.mockResolvedValue({
+				role: "MEMBER",
+			});
+			mockUserRepository.findByUsername.mockResolvedValue(null);
 
 			await expect(
 				inviteUserToCommunitySpace("typescript", "missinguser", "usr_sender"),
@@ -493,7 +509,7 @@ describe("Community Service Unit Test Suite", () => {
 
 	describe("assignModeratorRole", () => {
 		it("Business Rule (Forbidden): should block assignment if executor is not an administrator", async () => {
-			mockPrisma.membership.findFirst.mockResolvedValue(null);
+			mockCommunityRepository.findModeratorMembership.mockResolvedValue(null);
 
 			await expect(
 				assignModeratorRole("cmnt_123", "usr_target", "usr_executor"),
@@ -505,11 +521,14 @@ describe("Community Service Unit Test Suite", () => {
 			);
 		});
 
-		it("Happy Path (Early Return): should return early if target is already an active moderator", async () => {
-			mockPrisma.membership.findFirst.mockResolvedValue({ id: "exec_mem" });
+		it("Happy Path (Idempotent): should safely promote an existing moderator", async () => {
+			mockCommunityRepository.findModeratorMembership.mockResolvedValue({
+				id: "exec_mem",
+			});
 			mockCommunityRepository.findMembership.mockResolvedValue({
 				role: MembershipRole.MODERATOR,
 			});
+			mockCommunityRepository.promoteMembership.mockResolvedValue({});
 
 			const result = await assignModeratorRole(
 				"cmnt_123",
@@ -517,21 +536,21 @@ describe("Community Service Unit Test Suite", () => {
 				"usr_executor",
 			);
 
-			expect(result).toEqual({
-				message: "User is already an active moderator of this community space.",
-			});
-			expect(
-				mockCommunityRepository.updateMembershipRole,
-			).not.toHaveBeenCalled();
-			expect(mockCommunityRepository.createMembership).not.toHaveBeenCalled();
+			expect(result.message).toContain("successfully granted");
+			expect(mockCommunityRepository.promoteMembership).toHaveBeenCalledWith(
+				"cmnt_123",
+				"usr_target",
+			);
 		});
 
 		it("Happy Path (Update): should promote existing member and bust community cache metadata", async () => {
-			mockPrisma.membership.findFirst.mockResolvedValue({ id: "exec_mem" });
-			mockCommunityRepository.findMembership.mockResolvedValue({
-				role: MembershipRole.MEMBER,
+			mockCommunityRepository.findModeratorMembership.mockResolvedValue({
+				id: "exec_mem",
 			});
-			mockPrisma.community.findUnique.mockResolvedValue({ slug: "typescript" });
+			mockCommunityRepository.promoteMembership.mockResolvedValue({});
+			mockCommunityRepository.findById.mockResolvedValue({
+				slug: "typescript",
+			});
 
 			const result = await assignModeratorRole(
 				"cmnt_123",
@@ -539,19 +558,22 @@ describe("Community Service Unit Test Suite", () => {
 				"usr_executor",
 			);
 
-			expect(mockCommunityRepository.updateMembershipRole).toHaveBeenCalledWith(
+			expect(mockCommunityRepository.promoteMembership).toHaveBeenCalledWith(
 				"cmnt_123",
 				"usr_target",
-				MembershipRole.MODERATOR,
 			);
 			expect(mockRedis.del).toHaveBeenCalledWith("community:slug:typescript");
 			expect(result.message).toContain("successfully granted");
 		});
 
 		it("Happy Path (Create): should directly provision new membership record if user holds no prior relation", async () => {
-			mockPrisma.membership.findFirst.mockResolvedValue({ id: "exec_mem" });
-			mockCommunityRepository.findMembership.mockResolvedValue(null);
-			mockPrisma.community.findUnique.mockResolvedValue({ slug: "typescript" });
+			mockCommunityRepository.findModeratorMembership.mockResolvedValue({
+				id: "exec_mem",
+			});
+			mockCommunityRepository.promoteMembership.mockResolvedValue({});
+			mockCommunityRepository.findById.mockResolvedValue({
+				slug: "typescript",
+			});
 
 			const result = await assignModeratorRole(
 				"cmnt_123",
@@ -559,10 +581,9 @@ describe("Community Service Unit Test Suite", () => {
 				"usr_executor",
 			);
 
-			expect(mockCommunityRepository.createMembership).toHaveBeenCalledWith(
+			expect(mockCommunityRepository.promoteMembership).toHaveBeenCalledWith(
 				"cmnt_123",
 				"usr_target",
-				MembershipRole.MODERATOR,
 			);
 			expect(mockRedis.del).toHaveBeenCalledWith("community:slug:typescript");
 			expect(result.message).toContain("successfully granted");
@@ -606,7 +627,9 @@ describe("Community Service Unit Test Suite", () => {
 			mockCommunityRepository.findMembership.mockResolvedValue({
 				role: MembershipRole.MODERATOR,
 			});
-			mockCommunityRepository.countModerators.mockResolvedValue(1);
+			mockCommunityRepository.demoteModeratorIfAnotherExists.mockResolvedValue(
+				0,
+			);
 
 			await expect(
 				revokeModeratorRole("cmnt_123", "usr_target", "usr_executor"),
@@ -625,8 +648,12 @@ describe("Community Service Unit Test Suite", () => {
 			mockCommunityRepository.findMembership.mockResolvedValue({
 				role: MembershipRole.MODERATOR,
 			});
-			mockCommunityRepository.countModerators.mockResolvedValue(2);
-			mockPrisma.community.findUnique.mockResolvedValue({ slug: "typescript" });
+			mockCommunityRepository.demoteModeratorIfAnotherExists.mockResolvedValue(
+				1,
+			);
+			mockCommunityRepository.findById.mockResolvedValue({
+				slug: "typescript",
+			});
 
 			const result = await revokeModeratorRole(
 				"cmnt_123",
@@ -634,11 +661,9 @@ describe("Community Service Unit Test Suite", () => {
 				"usr_executor",
 			);
 
-			expect(mockCommunityRepository.updateMembershipRole).toHaveBeenCalledWith(
-				"cmnt_123",
-				"usr_target",
-				MembershipRole.MEMBER,
-			);
+			expect(
+				mockCommunityRepository.demoteModeratorIfAnotherExists,
+			).toHaveBeenCalledWith("cmnt_123", "usr_target");
 			expect(mockRedis.del).toHaveBeenCalledWith("community:slug:typescript");
 			expect(result.message).toContain(
 				"successfully removed from the community moderator panel",

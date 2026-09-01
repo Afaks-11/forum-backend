@@ -1,12 +1,13 @@
 import type { PrismaClient } from "../generated/prisma/client.js";
 import { MembershipRole } from "../generated/prisma/enums.js";
+import { postListInclude } from "./post.repository.js";
 
 export class CommunityRepository {
 	constructor(private readonly prisma: PrismaClient) {}
 
 	async findById(id: string) {
-		return await this.prisma.community.findUnique({
-			where: { id },
+		return await this.prisma.community.findFirst({
+			where: { id, deletedAt: null },
 		});
 	}
 
@@ -17,6 +18,7 @@ export class CommunityRepository {
 	async findByNameOrSlug(name: string, slug: string) {
 		return await this.prisma.community.findFirst({
 			where: {
+				deletedAt: null,
 				OR: [{ name }, { slug }],
 			},
 		});
@@ -59,8 +61,8 @@ export class CommunityRepository {
 	 * Find a unique community profile by URL slug
 	 */
 	async findBySlug(slug: string) {
-		return await this.prisma.community.findUnique({
-			where: { slug },
+		return await this.prisma.community.findFirst({
+			where: { slug, deletedAt: null },
 		});
 	}
 
@@ -69,6 +71,7 @@ export class CommunityRepository {
 	 */
 	async findAllCommunitiesWithMemberCount() {
 		return await this.prisma.community.findMany({
+			where: { deletedAt: null },
 			include: { _count: { select: { members: true } } },
 		});
 	}
@@ -123,10 +126,12 @@ export class CommunityRepository {
 	/**
 	 * Query feed posts originating from a specific community
 	 */
-	async findPostsByCommunityId(communityId: string) {
+	async findPostsByCommunityId(communityId: string, limit = 50) {
 		return await this.prisma.post.findMany({
-			where: { communityId },
-			orderBy: { createdAt: "desc" },
+			where: { communityId, deletedAt: null },
+			take: limit,
+			include: postListInclude,
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
 		});
 	}
 
@@ -139,6 +144,7 @@ export class CommunityRepository {
 	) {
 		return await this.prisma.membership.findMany({
 			where: {
+				community: { deletedAt: null },
 				communityId,
 				...(role && { role }),
 			},
@@ -228,12 +234,41 @@ export class CommunityRepository {
 		});
 	}
 
+	async promoteMembership(communityId: string, userId: string) {
+		return await this.prisma.membership.upsert({
+			where: { userId_communityId: { userId, communityId } },
+			update: { role: MembershipRole.MODERATOR },
+			create: { communityId, userId, role: MembershipRole.MODERATOR },
+		});
+	}
+
+	async demoteModeratorIfAnotherExists(communityId: string, userId: string) {
+		return await this.prisma.$transaction(async (tx) => {
+			// Serialize moderator removals per community. A plain count-then-update
+			// lets two concurrent requests both observe two moderators and demote
+			// both; the transaction-scoped advisory lock makes the second request
+			// re-evaluate only after the first commits.
+			await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${communityId}))`;
+			const count = await tx.membership.count({
+				where: { communityId, role: MembershipRole.MODERATOR },
+			});
+			if (count <= 1) return 0;
+
+			const result = await tx.membership.updateMany({
+				where: { communityId, userId, role: MembershipRole.MODERATOR },
+				data: { role: MembershipRole.MEMBER },
+			});
+			return result.count;
+		});
+	}
+
 	/**
 	 * Case-insensitive search across community names and slugs.
 	 */
 	async searchCommunities(query: string, limit: number) {
 		return await this.prisma.community.findMany({
 			where: {
+				deletedAt: null,
 				OR: [
 					{ name: { contains: query, mode: "insensitive" } },
 					{ slug: { contains: query, mode: "insensitive" } },

@@ -1,7 +1,6 @@
 import { AppError } from "../errors/AppError.js";
 import { MembershipRole } from "../generated/prisma/enums.js";
-import { communityRepository } from "../repositories/index.js";
-import { prisma } from "../utils/prisma.js";
+import { communityRepository, userRepository } from "../repositories/index.js";
 import { redis } from "../utils/redis.js";
 import type {
 	CommunitySearchInput,
@@ -18,6 +17,15 @@ type CommunityListPayload = Awaited<
 type CommunityFeedPayload = Awaited<
 	ReturnType<typeof communityRepository.findPostsByCommunityId>
 >;
+
+const createCommunitySlug = (name: string): string =>
+	name
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
 
 /**
  * Resolves a community by slug through a 24-hour cache.
@@ -56,7 +64,10 @@ export const createCommunity = async (
 	data: CreateCommunityInput,
 	creatorId: string,
 ) => {
-	const slug = data.name.toLowerCase();
+	const slug = createCommunitySlug(data.name);
+	if (slug.length < 2) {
+		throw new AppError("Community name cannot produce a valid slug", 400);
+	}
 	const existing = await communityRepository.findByNameOrSlug(data.name, slug);
 	if (existing) {
 		throw new AppError("A community with this name already exists", 409);
@@ -291,14 +302,18 @@ export const inviteUserToCommunitySpace = async (
 	targetUsername: string,
 	senderId: string,
 ) => {
-	const community = await prisma.community.findUnique({
-		where: { slug: communitySlug },
-	});
+	const community = await communityRepository.findBySlug(communitySlug);
 	if (!community) throw new AppError("Target space workspace not found", 404);
 
-	const targetUser = await prisma.user.findUnique({
-		where: { username: targetUsername },
-	});
+	const senderMembership = await communityRepository.findMembership(
+		senderId,
+		community.id,
+	);
+	if (!senderMembership) {
+		throw new AppError("Only community members can invite other users", 403);
+	}
+
+	const targetUser = await userRepository.findByUsername(targetUsername);
 	if (!targetUser)
 		throw new AppError(`User account '@${targetUsername}' does not exist`, 404);
 
@@ -306,6 +321,7 @@ export const inviteUserToCommunitySpace = async (
 		recipientId: targetUser.id,
 		senderId,
 		type: "COMMUNITY_INVITE",
+		dedupeKey: `${community.id}:${senderId}`,
 		title: `Invitation to join r/${community.name}`,
 		content: `You have been explicitly invited to join and participate inside the ${community.name} group network!`,
 		link: `/communities/${community.slug}`,
@@ -321,13 +337,10 @@ export async function assignModeratorRole(
 	targetUserId: string,
 	currentUserId: string,
 ): Promise<{ message: string }> {
-	const executingMembership = await prisma.membership.findFirst({
-		where: {
-			communityId,
-			userId: currentUserId,
-			role: MembershipRole.MODERATOR,
-		},
-	});
+	const executingMembership = await communityRepository.findModeratorMembership(
+		currentUserId,
+		communityId,
+	);
 
 	if (!executingMembership) {
 		throw new AppError(
@@ -336,34 +349,9 @@ export async function assignModeratorRole(
 		);
 	}
 
-	const targetMembership = await communityRepository.findMembership(
-		targetUserId,
-		communityId,
-	);
+	await communityRepository.promoteMembership(communityId, targetUserId);
 
-	if (targetMembership?.role === MembershipRole.MODERATOR) {
-		return {
-			message: "User is already an active moderator of this community space.",
-		};
-	}
-
-	if (targetMembership) {
-		await communityRepository.updateMembershipRole(
-			communityId,
-			targetUserId,
-			MembershipRole.MODERATOR,
-		);
-	} else {
-		await communityRepository.createMembership(
-			communityId,
-			targetUserId,
-			MembershipRole.MODERATOR,
-		);
-	}
-
-	const community = await prisma.community.findUnique({
-		where: { id: communityId },
-	});
+	const community = await communityRepository.findById(communityId);
 	if (community) {
 		await redis.del(`community:slug:${community.slug}`);
 	}
@@ -407,25 +395,19 @@ export async function revokeModeratorRole(
 
 	// Refuse to demote the last moderator: the community would be left with no
 	// one able to moderate it or appoint a replacement.
-	const totalModsRemaining =
-		await communityRepository.countModerators(communityId);
+	const updated = await communityRepository.demoteModeratorIfAnotherExists(
+		communityId,
+		targetUserId,
+	);
 
-	if (totalModsRemaining <= 1) {
+	if (updated === 0) {
 		throw new AppError(
 			"Bad Request: You cannot leave this community without at least one active administrator.",
 			400,
 		);
 	}
 
-	await communityRepository.updateMembershipRole(
-		communityId,
-		targetUserId,
-		MembershipRole.MEMBER,
-	);
-
-	const community = await prisma.community.findUnique({
-		where: { id: communityId },
-	});
+	const community = await communityRepository.findById(communityId);
 	if (community) {
 		await redis.del(`community:slug:${community.slug}`);
 	}

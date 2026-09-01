@@ -27,12 +27,9 @@ export const createCommunitySchema = z
 	.object({
 		name: z
 			.string()
+			.trim()
 			.min(3, "Community name must be at least 3 characters")
 			.max(30, "Community name cannot exceed 30 characters")
-			.regex(
-				/^[a-zA-Z0-9-]+$/,
-				"Name can only contain alphanumeric characters and hyphens",
-			)
 			.openapi({
 				description:
 					"REQUIRED: The unique public display name. (e.g. 'NodeJS-Group')",
@@ -50,6 +47,16 @@ export const createCommunitySchema = z
 					"The ultimate gathering ground for modern backend system engineers.",
 			}),
 	})
+	.refine(
+		(data) =>
+			data.name
+				.normalize("NFKD")
+				.replace(/[\u0300-\u036f]/g, "")
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, "-")
+				.replace(/^-+|-+$/g, "").length >= 2,
+		"Community name must contain at least two URL-safe characters",
+	)
 	.openapi("CreateCommunityInput");
 
 export const updateCommunitySchema = z

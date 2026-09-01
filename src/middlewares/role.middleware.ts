@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { logger } from "../utils/logger.js";
 import { prisma } from "../utils/prisma.js";
 
-type AllowedRole = "USER" | "MODERATOR" | "ADMIN";
+type AllowedRole = "USER" | "ADMIN";
 
 /**
  * Rejects requests whose caller lacks one of the allowed roles.
@@ -73,4 +73,3 @@ export const requireRole = (allowedRoles: AllowedRole[]) => {
 };
 
 export const requireAdmin = requireRole(["ADMIN"]);
-export const requireModerator = requireRole(["MODERATOR", "ADMIN"]);
