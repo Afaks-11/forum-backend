@@ -26,12 +26,18 @@ import metricRouter from "./routes/metrics.routes.js";
 import notificationRouter from "./routes/notification.routes.js";
 import postRouter from "./routes/post.routes.js";
 import recommendationRouter from "./routes/recommendation.routes.js";
+import reportRouter from "./routes/report.routes.js";
 import uploadRouter from "./routes/upload.routes.js";
 import userRouter from "./routes/user.routes.js";
 import voteRouter from "./routes/vote.routes.js";
 
 const app = express();
 const openApiDocumentation = generateOpenApiDocs();
+
+// Express must be told how many proxy hops to trust before `req.ip` reflects the
+// real client. Left unset, every request behind a load balancer reports the
+// proxy's address, so the per-IP rate limiter meters all users as one bucket.
+app.set("trust proxy", env.app.trustProxyHops);
 
 const allowedOrigins = env.app.corsOrigins;
 
@@ -89,6 +95,7 @@ api.use("/votes", voteRouter);
 api.use("/users", userRouter);
 api.use("/notifications", notificationRouter);
 api.use("/recommendations", recommendationRouter);
+api.use("/reports", reportRouter);
 api.use("/feed", feedRouter);
 api.use("/upload", uploadRouter);
 

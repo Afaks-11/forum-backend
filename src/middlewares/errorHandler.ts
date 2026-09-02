@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { AppError } from "../errors/AppError.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -34,6 +35,28 @@ export function globalErrorHandler(
 			message: err.message,
 			traceId,
 		});
+	}
+
+	if (err instanceof Prisma.PrismaClientKnownRequestError) {
+		const mapped = {
+			P2002: {
+				status: 409,
+				message: "A record with these values already exists",
+			},
+			P2003: {
+				status: 409,
+				message: "The operation conflicts with related data",
+			},
+			P2025: { status: 404, message: "The requested record was not found" },
+		}[err.code];
+
+		if (mapped) {
+			return res.status(mapped.status).json({
+				success: false,
+				message: mapped.message,
+				traceId,
+			});
+		}
 	}
 
 	// Unexpected errors are logged in full but answered generically: internal
