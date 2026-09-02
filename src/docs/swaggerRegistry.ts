@@ -14,12 +14,14 @@ import {
 	registerSchema,
 	resendTokenSchema,
 	resetPasswordSchema,
+	updatedProfileResponseWrapper,
 	updateMeSchema,
 	userResponseSchema,
 	verifyEmailSchema,
 } from "../validators/auth.validator.js";
 import {
 	commentIdParamSchema,
+	commentListQuerySchema,
 	commentResponseSchema,
 	createCommentSchema,
 	updateCommentSchema,
@@ -39,15 +41,21 @@ import {
 	updateCommunitySchema,
 	updateRulesSchema,
 } from "../validators/community.validator.js";
-import { feedPostItemSchema } from "../validators/feed.validator.js";
+import {
+	feedPostItemSchema,
+	feedQuerySchema,
+	feedResponseSchema,
+} from "../validators/feed.validator.js";
 import {
 	DeepReadinessSchema,
 	HealthStatusSchema,
 } from "../validators/health.validator.js";
 import {
+	notificationIdParamSchema,
+	notificationListQuerySchema,
+} from "../validators/notification.validator.js";
+import {
 	createPostSchema,
-	postFeedQuerySchema,
-	postFeedResponseSchema,
 	postIdParamSchema,
 	postResponseSchema,
 	postVotesDataSchema,
@@ -55,8 +63,14 @@ import {
 } from "../validators/post.validator.js";
 import { recommendedCommunityItemSchema } from "../validators/recommendation.validator.js";
 import {
+	reportIdParamSchema,
+	reportListQuerySchema,
+	resolveReportSchema,
+} from "../validators/report.validator.js";
+import {
 	profileCommentItemSchema,
 	profilePostItemSchema,
+	savedItemsQuerySchema,
 	standardMessageResponseSchema,
 	usernameParamSchema,
 	userProfileResponseSchema,
@@ -74,6 +88,7 @@ const usersTag = "User Profiles & Social Graph";
 const uploadsTag = "Media & Asset Uploads";
 const recommendationTag = "Recommendations";
 const healthTags = "Infrastructure";
+const reportsTag = "Moderation Reports";
 
 const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
 	type: "http",
@@ -82,6 +97,17 @@ const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
 	description:
 		"Enter your short-lived access JWT token here. The backend automatically extracts your userId from this token.",
 });
+
+const operationsBasicAuth = registry.registerComponent(
+	"securitySchemes",
+	"operationsBasicAuth",
+	{
+		type: "http",
+		scheme: "basic",
+		description:
+			"Operational credentials shared by Prometheus metrics and the BullMQ dashboard.",
+	},
+);
 
 registry.registerPath({
 	method: "post",
@@ -168,7 +194,9 @@ registry.registerPath({
 	responses: {
 		200: {
 			description: "Profile modified successfully",
-			content: { "application/json": { schema: profileResponseWrapper } },
+			content: {
+				"application/json": { schema: updatedProfileResponseWrapper },
+			},
 		},
 	},
 });
@@ -357,6 +385,44 @@ registry.registerPath({
 					schema: z.object({
 						success: z.boolean(),
 						data: z.array(profileCommentItemSchema),
+					}),
+				},
+			},
+		},
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/users/me/saved/posts",
+	summary: "List the authenticated user's saved posts",
+	tags: [usersTag],
+	security: [{ bearerAuth: [] }],
+	request: { query: savedItemsQuerySchema },
+	responses: {
+		200: {
+			description: "Cursor-paginated saved post list.",
+			content: { "application/json": { schema: feedResponseSchema } },
+		},
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/users/me/saved/comments",
+	summary: "List the authenticated user's saved comments",
+	tags: [usersTag],
+	security: [{ bearerAuth: [] }],
+	request: { query: savedItemsQuerySchema },
+	responses: {
+		200: {
+			description: "Cursor-paginated saved comment list.",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: z.array(commentResponseSchema),
+						meta: z.object({ nextCursor: z.string().nullable() }),
 					}),
 				},
 			},
@@ -890,7 +956,7 @@ registry.registerPath({
 	summary:
 		"Fetch standard or aggregated post feed timeline with pagination limit of 10",
 	tags: [postsTag],
-	request: { query: postFeedQuerySchema },
+	request: { query: feedQuerySchema },
 	responses: {
 		200: {
 			description: "Returns array list of matching post entities.",
@@ -898,7 +964,8 @@ registry.registerPath({
 				"application/json": {
 					schema: z.object({
 						success: z.boolean(),
-						data: postFeedResponseSchema,
+						data: z.array(feedPostItemSchema),
+						meta: z.object({ nextCursor: z.string().nullable() }),
 					}),
 				},
 			},
@@ -919,7 +986,7 @@ registry.registerPath({
 				"application/json": {
 					schema: z.object({
 						success: z.boolean(),
-						data: postFeedResponseSchema,
+						data: postResponseSchema,
 					}),
 				},
 			},
@@ -1130,29 +1197,7 @@ registry.registerPath({
 		"Fetch advanced chronologically sorted or algorithmically ranked global/contextual post feeds",
 	tags: [postsTag],
 	request: {
-		query: z.object({
-			sort: z.enum(["new", "top", "hot", "controversial"]).optional().openapi({
-				description: "Ranking strategy identifier link",
-				example: "hot",
-			}),
-			community: z.string().optional().openapi({
-				description: "Filter items scoped only to a specific community slug",
-				example: "typescript",
-			}),
-			author: z.string().optional().openapi({
-				description: "Filter items scoped to an author's username",
-				example: "dev_wizard",
-			}),
-			limit: z.string().optional().openapi({
-				description: "Total item row window limit execution bounds",
-				example: "10",
-			}),
-			cursor: z.string().optional().openapi({
-				description:
-					"Pagination marker (Database item ID or Redis index position count string)",
-				example: "10",
-			}),
-		}),
+		query: feedQuerySchema,
 	},
 	responses: {
 		200: {
@@ -1366,10 +1411,8 @@ registry.registerPath({
 registry.registerPath({
 	method: "get",
 	path: "/comments/post/{postId}",
-	summary:
-		"Fetch the chronological list of active comments for a specific post",
+	summary: "Fetch a chronological, thread-preserving comment page for a post",
 	tags: [commentsTag],
-	security: [{ bearerAuth: [] }],
 	request: {
 		params: z.object({
 			postId: z.uuid().openapi({
@@ -1377,16 +1420,18 @@ registry.registerPath({
 				example: "8f3b202c-819a-4d22-9653-3b60e6b5a34c",
 			}),
 		}),
+		query: commentListQuerySchema,
 	},
 	responses: {
 		200: {
 			description:
-				"An array list containing all non-deleted comments associated with the target post identifier.",
+				"Deleted parent rows remain as placeholders so replies retain their thread structure.",
 			content: {
 				"application/json": {
 					schema: z.object({
 						success: z.boolean(),
 						data: z.array(commentResponseSchema),
+						meta: z.object({ nextCursor: z.string().nullable() }),
 					}),
 				},
 			},
@@ -1536,6 +1581,80 @@ registry.registerPath({
 	},
 });
 
+const notificationSchema = z.object({
+	id: z.uuid(),
+	recipientId: z.uuid(),
+	senderId: z.uuid().nullable(),
+	type: z.enum([
+		"NEW_FOLLOWER",
+		"COMMENT",
+		"REPLY",
+		"MOD_ACTION",
+		"COMMUNITY_INVITE",
+	]),
+	title: z.string(),
+	content: z.string(),
+	link: z.string().nullable(),
+	isRead: z.boolean(),
+	createdAt: z.date(),
+});
+
+for (const unreadOnly of [false, true]) {
+	registry.registerPath({
+		method: "get",
+		path: unreadOnly ? "/notifications/unread" : "/notifications",
+		summary: unreadOnly ? "List unread notifications" : "List notifications",
+		tags: ["Notifications"],
+		security: [{ bearerAuth: [] }],
+		request: { query: notificationListQuerySchema },
+		responses: {
+			200: {
+				description: "Cursor-paginated notification list.",
+				content: {
+					"application/json": {
+						schema: z.object({
+							success: z.boolean(),
+							data: z.array(notificationSchema),
+							meta: z.object({ nextCursor: z.string().nullable() }),
+						}),
+					},
+				},
+			},
+		},
+	});
+}
+
+registry.registerPath({
+	method: "get",
+	path: "/notifications/unread/count",
+	summary: "Get unread notification count",
+	tags: ["Notifications"],
+	security: [{ bearerAuth: [] }],
+	responses: {
+		200: {
+			description: "Current unread total.",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: z.object({ count: z.number().int() }),
+					}),
+				},
+			},
+		},
+	},
+});
+
+registry.registerPath({
+	method: "patch",
+	path: "/notifications/{id}/read",
+	summary: "Mark one notification read",
+	tags: ["Notifications"],
+	security: [{ bearerAuth: [] }],
+	request: { params: notificationIdParamSchema },
+	responses: { 200: { description: "Notification marked read." } },
+});
+
 //Upload
 registry.registerPath({
 	method: "get",
@@ -1676,6 +1795,7 @@ registry.registerPath({
 registry.registerPath({
 	method: "get",
 	path: "/health/live",
+	servers: [{ url: "/" }],
 	summary: "Public runtime liveness probe check",
 	tags: [healthTags],
 	responses: {
@@ -1683,10 +1803,7 @@ registry.registerPath({
 			description: "Runtime environment event loop is responsive",
 			content: {
 				"application/json": {
-					schema: z.object({
-						success: z.boolean(),
-						message: z.string(),
-					}),
+					schema: z.object({ status: z.literal("ALIVE") }),
 				},
 			},
 		},
@@ -1696,27 +1813,18 @@ registry.registerPath({
 registry.registerPath({
 	method: "get",
 	path: "/health",
+	servers: [{ url: "/" }],
 	summary: "Basic application health diagnostics status",
 	tags: [healthTags],
-	security: [{ [bearerAuth.name]: [] }],
 	responses: {
 		200: {
 			description:
 				"Application system uptime diagnostics metrics returned successfully",
 			content: {
 				"application/json": {
-					schema: z.object({
-						success: z.boolean(),
-						data: HealthStatusSchema,
-					}),
+					schema: HealthStatusSchema,
 				},
 			},
-		},
-		401: {
-			description: "Unauthenticated access context missing token headers",
-		},
-		403: {
-			description: "Forbidden: Request context missing Admin permissions",
 		},
 	},
 });
@@ -1724,18 +1832,15 @@ registry.registerPath({
 registry.registerPath({
 	method: "get",
 	path: "/health/ready",
+	servers: [{ url: "/" }],
 	summary: "Deep dependency infrastructure readiness validation check",
 	tags: [healthTags],
-	security: [{ [bearerAuth.name]: [] }],
 	responses: {
 		200: {
 			description: "All critical backing subsystems are responsive and online",
 			content: {
 				"application/json": {
-					schema: z.object({
-						success: z.boolean(),
-						data: DeepReadinessSchema,
-					}),
+					schema: DeepReadinessSchema,
 				},
 			},
 		},
@@ -1744,10 +1849,7 @@ registry.registerPath({
 				"One or more core network data services are currently degraded or unreachable",
 			content: {
 				"application/json": {
-					schema: z.object({
-						success: z.boolean(),
-						data: DeepReadinessSchema,
-					}),
+					schema: DeepReadinessSchema,
 				},
 			},
 		},
@@ -1757,9 +1859,10 @@ registry.registerPath({
 registry.registerPath({
 	method: "get",
 	path: "/metrics",
+	servers: [{ url: "/" }],
 	summary: "Expose Prometheus raw tracking performance telemetry",
 	tags: [healthTags],
-	security: [{ [bearerAuth.name]: [] }],
+	security: [{ [operationsBasicAuth.name]: [] }],
 	responses: {
 		200: {
 			description: "Plain text formatted OpenMetrics scraping pool dump",
@@ -1774,6 +1877,45 @@ registry.registerPath({
 		},
 		401: { description: "Unauthenticated context" },
 		403: { description: "Forbidden" },
+	},
+});
+
+registry.registerPath({
+	method: "get",
+	path: "/reports",
+	summary: "List post or comment reports for moderation triage",
+	tags: [reportsTag],
+	security: [{ bearerAuth: [] }],
+	request: { query: reportListQuerySchema },
+	responses: {
+		200: {
+			description: "Cursor-paginated moderation report queue.",
+			content: {
+				"application/json": {
+					schema: z.object({
+						success: z.boolean(),
+						data: z.array(z.record(z.string(), z.unknown())),
+						meta: z.object({ nextCursor: z.string().nullable() }),
+					}),
+				},
+			},
+		},
+	},
+});
+
+registry.registerPath({
+	method: "patch",
+	path: "/reports/{id}",
+	summary: "Resolve or dismiss a moderation report",
+	tags: [reportsTag],
+	security: [{ bearerAuth: [] }],
+	request: {
+		params: reportIdParamSchema,
+		body: { content: { "application/json": { schema: resolveReportSchema } } },
+	},
+	responses: {
+		200: { description: "Report triage status updated." },
+		404: { description: "Report not found." },
 	},
 });
 
