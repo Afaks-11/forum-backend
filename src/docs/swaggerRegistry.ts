@@ -29,6 +29,7 @@ import {
 import {
 	addModeratorSchema,
 	communityIdParamSchema,
+	communityInvitationIdParamSchema,
 	communityMemberItemSchema,
 	communityPostItemSchema,
 	communityResponseSchema,
@@ -589,6 +590,24 @@ registry.registerPath({
 	},
 });
 
+for (const action of ["accept", "decline"] as const) {
+	registry.registerPath({
+		method: "post",
+		path: `/communities/invitations/{id}/${action}`,
+		summary: `${action === "accept" ? "Accept" : "Decline"} a community invitation`,
+		tags: [communityTag],
+		security: [{ bearerAuth: [] }],
+		request: { params: communityInvitationIdParamSchema },
+		responses: {
+			200: { description: `Community invitation ${action}ed successfully.` },
+			404: {
+				description:
+					"Invitation is invalid, expired, or not addressed to the authenticated user.",
+			},
+		},
+	});
+}
+
 registry.registerPath({
 	method: "get",
 	path: "/communities",
@@ -636,7 +655,9 @@ registry.registerPath({
 registry.registerPath({
 	method: "patch",
 	path: "/communities/{slug}",
-	summary: "Modify general community profile information data",
+	summary: "Modify community name, slug, and description",
+	description:
+		"Only a moderator of this community or a forum administrator can modify these fields.",
 	tags: [communityTag],
 	security: [{ bearerAuth: [] }],
 	request: {
@@ -656,6 +677,10 @@ registry.registerPath({
 					}),
 				},
 			},
+		},
+		403: {
+			description:
+				"Only a community moderator or forum administrator may update the profile.",
 		},
 	},
 });
@@ -781,6 +806,8 @@ registry.registerPath({
 	method: "patch",
 	path: "/communities/{slug}/rules",
 	summary: "Modify operational code of conduct rules text",
+	description:
+		"Only a moderator of this community or a forum administrator can modify the rules.",
 	tags: [communityTag],
 	security: [{ bearerAuth: [] }],
 	request: {
@@ -799,6 +826,10 @@ registry.registerPath({
 				},
 			},
 		},
+		403: {
+			description:
+				"Only a community moderator or forum administrator may update rules.",
+		},
 	},
 });
 
@@ -806,6 +837,8 @@ registry.registerPath({
 	method: "patch",
 	path: "/communities/{slug}/avatar",
 	summary: "Change community icon avatar image",
+	description:
+		"Only a moderator of this community or a forum administrator can modify the avatar.",
 	tags: [communityTag],
 	security: [{ bearerAuth: [] }],
 	request: {
@@ -824,6 +857,10 @@ registry.registerPath({
 				},
 			},
 		},
+		403: {
+			description:
+				"Only a community moderator or forum administrator may update the avatar.",
+		},
 	},
 });
 
@@ -831,6 +868,8 @@ registry.registerPath({
 	method: "patch",
 	path: "/communities/{slug}/banner",
 	summary: "Update horizontal cover background banner asset",
+	description:
+		"Only a moderator of this community or a forum administrator can modify the banner.",
 	tags: [communityTag],
 	security: [{ bearerAuth: [] }],
 	request: {
@@ -848,6 +887,10 @@ registry.registerPath({
 					}),
 				},
 			},
+		},
+		403: {
+			description:
+				"Only a community moderator or forum administrator may update the banner.",
 		},
 	},
 });
