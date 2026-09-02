@@ -1,8 +1,13 @@
-import type { PrismaClient, SystemRole } from "../generated/prisma/client.js";
+import {
+	Prisma,
+	type PrismaClient,
+	type SystemRole,
+} from "../generated/prisma/client.js";
 import type {
 	RegisterInput,
 	UpdateMeInput,
 } from "../validators/auth.validator.js";
+import { postListInclude } from "./post.repository.js";
 
 export class UserRepository {
 	constructor(private readonly prisma: PrismaClient) {}
@@ -85,6 +90,7 @@ export class UserRepository {
 				id: true,
 				username: true,
 				email: true,
+				role: true,
 				isEmailVerified: true,
 				createdAt: true,
 			},
@@ -195,8 +201,8 @@ export class UserRepository {
 	 */
 	async updateVerificationToken(
 		id: string,
-		emailVerifyToken: string | null,
-		emailVerifyTokenExpires: Date | null,
+		emailVerifyToken: string,
+		emailVerifyTokenExpires: Date,
 	) {
 		return await this.prisma.user.update({
 			where: { id },
@@ -207,15 +213,22 @@ export class UserRepository {
 	/**
 	 * Mark email status as verified and clear verification token
 	 */
-	async verifyEmailStatus(id: string) {
-		return await this.prisma.user.update({
-			where: { id },
+	async verifyEmailByToken(token: string) {
+		const result = await this.prisma.user.updateMany({
+			where: {
+				emailVerifyToken: token,
+				emailVerifyTokenExpires: {
+					gt: new Date(),
+				},
+			},
 			data: {
 				isEmailVerified: true,
 				emailVerifyToken: null,
 				emailVerifyTokenExpires: null,
 			},
 		});
+
+		return result.count > 0;
 	}
 
 	/**
@@ -269,20 +282,23 @@ export class UserRepository {
 	/**
 	 * Retrieve all posts published by a user
 	 */
-	async findPostsByAuthorId(authorId: string) {
+	async findPostsByAuthorId(authorId: string, limit = 50) {
 		return await this.prisma.post.findMany({
-			where: { authorId },
-			orderBy: { createdAt: "desc" },
+			where: { authorId, deletedAt: null },
+			take: limit,
+			include: postListInclude,
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
 		});
 	}
 
 	/**
 	 * Retrieve all comments published by a user
 	 */
-	async findCommentsByAuthorId(authorId: string) {
+	async findCommentsByAuthorId(authorId: string, limit = 50) {
 		return await this.prisma.comment.findMany({
-			where: { authorId },
-			orderBy: { createdAt: "desc" },
+			where: { authorId, deletedAt: null },
+			take: limit,
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
 		});
 	}
 
@@ -387,29 +403,68 @@ export class UserRepository {
 	 * race past the threshold and bypass the lock.
 	 */
 	async incrementLoginAttemptsAtomic(userId: string) {
-		return await this.prisma.$transaction(async (tx) => {
-			const user = await tx.user.findUnique({
-				where: { id: userId },
-				select: { loginAttempts: true },
-			});
+		const rows = await this.prisma.$queryRaw<
+			{ loginAttempts: number; lockUntil: Date | null }[]
+		>(Prisma.sql`
+			UPDATE users
+			SET login_attempts = login_attempts + 1,
+				lock_until = CASE
+					WHEN login_attempts + 1 >= 5
+					THEN NOW() + INTERVAL '15 minutes'
+					ELSE lock_until
+				END,
+				updated_at = NOW()
+			WHERE id = ${userId}
+			RETURNING login_attempts AS "loginAttempts", lock_until AS "lockUntil"
+		`);
 
-			if (!user) throw new Error("User profile target missing.");
+		const user = rows[0];
+		if (!user) throw new Error("User profile target missing.");
+		return user;
+	}
 
-			const nextAttemptsCount = user.loginAttempts + 1;
-			const updatePayload: { loginAttempts: number; lockUntil?: Date } = {
-				loginAttempts: nextAttemptsCount,
-			};
-
-			// Apply the lock timestamp only at the threshold, within the same write
-			// that increments the counter, so both land atomically.
-			if (nextAttemptsCount >= 5) {
-				updatePayload.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
-			}
-
-			return await tx.user.update({
-				where: { id: userId },
-				data: updatePayload,
-			});
+	async findSavedPosts(userId: string, limit: number, cursor?: string) {
+		const rows = await this.prisma.savedPost.findMany({
+			where: { userId, post: { deletedAt: null } },
+			take: limit + 1,
+			...(cursor
+				? { cursor: { userId_postId: { userId, postId: cursor } }, skip: 1 }
+				: {}),
+			include: { post: { include: postListInclude } },
+			orderBy: [{ createdAt: "desc" }, { postId: "desc" }],
 		});
+		const hasNextPage = rows.length > limit;
+		if (hasNextPage) rows.pop();
+		const last = rows[rows.length - 1];
+		return {
+			items: rows.map((row) => row.post),
+			nextCursor: hasNextPage && last ? last.postId : null,
+		};
+	}
+
+	async findSavedComments(userId: string, limit: number, cursor?: string) {
+		const rows = await this.prisma.savedComment.findMany({
+			where: { userId, comment: { deletedAt: null } },
+			take: limit + 1,
+			...(cursor
+				? {
+						cursor: { userId_commentId: { userId, commentId: cursor } },
+						skip: 1,
+					}
+				: {}),
+			include: {
+				comment: {
+					include: { author: { select: { id: true, username: true } } },
+				},
+			},
+			orderBy: [{ createdAt: "desc" }, { commentId: "desc" }],
+		});
+		const hasNextPage = rows.length > limit;
+		if (hasNextPage) rows.pop();
+		const last = rows[rows.length - 1];
+		return {
+			items: rows.map((row) => row.comment),
+			nextCursor: hasNextPage && last ? last.commentId : null,
+		};
 	}
 }

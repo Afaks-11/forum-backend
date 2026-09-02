@@ -21,8 +21,12 @@ const mockUserRepository = {
 const mockRedis = {
 	get: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	set: jest.fn<(...args: unknown[]) => Promise<void>>(),
+	del: jest.fn<(...args: unknown[]) => Promise<void>>(),
 	delPattern: jest.fn<(...args: unknown[]) => Promise<void>>(),
 };
+
+const mockSendInternalNotification =
+	jest.fn<(...args: unknown[]) => Promise<unknown>>();
 
 // Isolate ES Modules prior to test environment execution
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
@@ -31,6 +35,10 @@ await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
 	redis: mockRedis,
 }));
+await jest.unstable_mockModule(
+	"../../../src/services/notification.service.js",
+	() => ({ sendInternalNotification: mockSendInternalNotification }),
+);
 
 // Resolve targeted operations under testing
 const {
@@ -50,16 +58,17 @@ describe("User Service Unit Test Suite", () => {
 			mockRedis.get.mockReset();
 			mockUserRepository.findByUsername.mockReset();
 
-			const cachedData = { id: "usr_1", username: "alex", isFollowing: true };
+			const cachedData = { id: "usr_1", username: "alex" };
 			mockRedis.get.mockResolvedValue(cachedData);
+			mockUserRepository.checkFollowRelation.mockResolvedValue(true);
 
 			const result = await getUserProfileByUsername("alex", "usr_viewer");
 
 			expect(mockRedis.get).toHaveBeenCalledWith(
-				"profile:username:alex:viewer:usr_viewer",
+				"profile:username:alex:profile",
 			);
 			expect(mockUserRepository.findByUsername).not.toHaveBeenCalled();
-			expect(result).toEqual(cachedData);
+			expect(result).toEqual({ ...cachedData, isFollowing: true });
 		});
 
 		it("Business Rule (Not Found): should bubble up a 404 AppError if the target profile identity is missing", async () => {
@@ -81,6 +90,9 @@ describe("User Service Unit Test Suite", () => {
 
 			mockRedis.get.mockResolvedValue(null);
 			mockUserRepository.findByUsername.mockResolvedValue({
+				id: "usr_blocked_target",
+			});
+			mockUserRepository.findProfileWithCounters.mockResolvedValue({
 				id: "usr_blocked_target",
 			});
 			mockUserRepository.checkBlockRelation.mockResolvedValue(true);
@@ -137,8 +149,8 @@ describe("User Service Unit Test Suite", () => {
 			);
 
 			expect(mockRedis.set).toHaveBeenCalledWith(
-				"profile:username:target_user:viewer:usr_viewer",
-				{ ...rawProfile, isFollowing: true },
+				"profile:username:target_user:profile",
+				rawProfile,
 				3600,
 			);
 			expect(result).toEqual({ ...rawProfile, isFollowing: true });
@@ -244,10 +256,13 @@ describe("User Service Unit Test Suite", () => {
 			mockUserRepository.findByUsername.mockReset();
 			mockUserRepository.createFollowRelation.mockReset();
 			mockUserRepository.findById.mockReset();
-			mockRedis.delPattern.mockReset();
+			mockRedis.del.mockReset();
 
 			mockUserRepository.findByUsername.mockResolvedValue({
 				id: "usr_target_id",
+			});
+			mockUserRepository.findById.mockResolvedValue({
+				username: "follower_user",
 			});
 			mockUserRepository.findById.mockResolvedValue({
 				username: "follower_user",
@@ -259,12 +274,10 @@ describe("User Service Unit Test Suite", () => {
 				"usr_follower_id",
 				"usr_target_id",
 			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:follower_user:*",
-			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:target_user:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"profile:username:target_user:profile",
+				"profile:username:follower_user:profile",
+			]);
 		});
 	});
 
@@ -273,10 +286,13 @@ describe("User Service Unit Test Suite", () => {
 			mockUserRepository.findByUsername.mockReset();
 			mockUserRepository.deleteFollowRelation.mockReset();
 			mockUserRepository.findById.mockReset();
-			mockRedis.delPattern.mockReset();
+			mockRedis.del.mockReset();
 
 			mockUserRepository.findByUsername.mockResolvedValue({
 				id: "usr_target_id",
+			});
+			mockUserRepository.findById.mockResolvedValue({
+				username: "unfollower_user",
 			});
 			mockUserRepository.findById.mockResolvedValue({
 				username: "unfollower_user",
@@ -288,12 +304,10 @@ describe("User Service Unit Test Suite", () => {
 				"usr_unfollower_id",
 				"usr_target_id",
 			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:unfollower_user:*",
-			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:target_user:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"profile:username:target_user:profile",
+				"profile:username:unfollower_user:profile",
+			]);
 		});
 	});
 
@@ -312,9 +326,12 @@ describe("User Service Unit Test Suite", () => {
 			mockUserRepository.deleteMutualFollows.mockReset();
 			mockUserRepository.createBlockRelation.mockReset();
 			mockUserRepository.findById.mockReset();
-			mockRedis.delPattern.mockReset();
+			mockRedis.del.mockReset();
 
 			mockUserRepository.findByUsername.mockResolvedValue({ id: "usr_toxic" });
+			mockUserRepository.findById.mockResolvedValue({
+				username: "victim_user",
+			});
 			mockUserRepository.findById.mockResolvedValue({
 				username: "victim_user",
 			});
@@ -329,12 +346,10 @@ describe("User Service Unit Test Suite", () => {
 				"usr_victim",
 				"usr_toxic",
 			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:victim_user:*",
-			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:toxic_user:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"profile:username:toxic_user:profile",
+				"profile:username:victim_user:profile",
+			]);
 		});
 	});
 
@@ -343,10 +358,13 @@ describe("User Service Unit Test Suite", () => {
 			mockUserRepository.findByUsername.mockReset();
 			mockUserRepository.deleteBlockRelation.mockReset();
 			mockUserRepository.findById.mockReset();
-			mockRedis.delPattern.mockReset();
+			mockRedis.del.mockReset();
 
 			mockUserRepository.findByUsername.mockResolvedValue({
 				id: "usr_blocked",
+			});
+			mockUserRepository.findById.mockResolvedValue({
+				username: "merciful_user",
 			});
 			mockUserRepository.findById.mockResolvedValue({
 				username: "merciful_user",
@@ -358,12 +376,10 @@ describe("User Service Unit Test Suite", () => {
 				"usr_merciful",
 				"usr_blocked",
 			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:merciful_user:*",
-			);
-			expect(mockRedis.delPattern).toHaveBeenCalledWith(
-				"profile:username:blocked_user:*",
-			);
+			expect(mockRedis.del).toHaveBeenCalledWith([
+				"profile:username:blocked_user:profile",
+				"profile:username:merciful_user:profile",
+			]);
 		});
 	});
 

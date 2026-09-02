@@ -2,6 +2,8 @@ import { asyncHandler } from "../middlewares/asyncHandler.js";
 import {
 	blockUserAction,
 	followUserAction,
+	getSavedComments,
+	getSavedPosts,
 	getUserCommentsByUsername,
 	getUserPostsByUsername,
 	getUserProfileByUsername,
@@ -10,6 +12,7 @@ import {
 	unfollowUserAction,
 } from "../services/user.service.js";
 import {
+	savedItemsQuerySchema,
 	usernameParamSchema,
 	userSearchSchema,
 } from "../validators/user.validator.js";
@@ -74,5 +77,25 @@ export const handleUserSearch = asyncHandler(async (req, res) => {
 	res.status(200).json({
 		success: true,
 		data: users,
+	});
+});
+
+export const getMySavedPosts = asyncHandler(async (req, res) => {
+	const query = savedItemsQuerySchema.parse(req.query);
+	const result = await getSavedPosts(res.locals.user.userId, query);
+	res.status(200).json({
+		success: true,
+		data: result.items,
+		meta: { nextCursor: result.nextCursor },
+	});
+});
+
+export const getMySavedComments = asyncHandler(async (req, res) => {
+	const query = savedItemsQuerySchema.parse(req.query);
+	const result = await getSavedComments(res.locals.user.userId, query);
+	res.status(200).json({
+		success: true,
+		data: result.items,
+		meta: { nextCursor: result.nextCursor },
 	});
 });

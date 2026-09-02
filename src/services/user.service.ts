@@ -1,11 +1,16 @@
 import { AppError } from "../errors/AppError.js";
 import { userRepository } from "../repositories/index.js";
 import { redis } from "../utils/redis.js";
-import type { UserSearchInput } from "../validators/user.validator.js";
+import type {
+	SavedItemsQueryInput,
+	UserSearchInput,
+} from "../validators/user.validator.js";
+import { sendInternalNotification } from "./notification.service.js";
 
-type UserProfilePayload = Awaited<
-	ReturnType<typeof userRepository.findProfileWithCounters>
-> & {
+type UserProfileCorePayload = NonNullable<
+	Awaited<ReturnType<typeof userRepository.findProfileWithCounters>>
+>;
+type UserProfilePayload = UserProfileCorePayload & {
 	isFollowing: boolean;
 };
 type UserPostsPayload = Awaited<
@@ -15,6 +20,18 @@ type UserCommentsPayload = Awaited<
 	ReturnType<typeof userRepository.findCommentsByAuthorId>
 >;
 
+/** Cache key for a username's viewer-agnostic public profile payload. */
+const profileCacheKey = (username: string) =>
+	`profile:username:${username}:profile`;
+
+/** Cache key for a username's authored post list. */
+const profilePostsCacheKey = (username: string) =>
+	`profile:username:${username}:posts`;
+
+/** Cache key for a username's authored comment list. */
+const profileCommentsCacheKey = (username: string) =>
+	`profile:username:${username}:comments`;
+
 const getTargetUser = async (username: string) => {
 	const target = await userRepository.findByUsername(username);
 	if (!target) throw new AppError("Target user not found", 404);
@@ -22,56 +39,78 @@ const getTargetUser = async (username: string) => {
 };
 
 /**
+ * Drops the cached profiles of both sides of a relationship change.
+ *
+ * Only the two profile payloads move: each carries follower/following counters
+ * that a follow or block has just changed. The authored post and comment lists
+ * are unaffected, so they are deliberately left warm — and because the payload
+ * is viewer-agnostic these are exact-key deletes rather than the four
+ * `profile:username:*:viewer:*` SCAN sweeps this used to require per follow.
+ */
+const invalidateProfilePair = async (
+	currentUserId: string,
+	targetUsername: string,
+): Promise<void> => {
+	const keys = [profileCacheKey(targetUsername)];
+
+	const currentUser = await userRepository.findById(currentUserId);
+	if (currentUser) keys.push(profileCacheKey(currentUser.username));
+
+	await redis.del(keys);
+};
+
+/**
  * Returns a public profile with follower counters and the viewer's follow state.
  *
- * Cached per viewer because `isFollowing` and block visibility both depend on
- * who is asking; a shared entry would expose one viewer's relationship to all.
+ * The cached payload is viewer-agnostic; `isFollowing` and the block check are
+ * evaluated after the cache read against the target id carried in the payload.
+ * A per-viewer key would be correct too, but it fragments the cache into one
+ * entry per reader and makes every follow or block a keyspace scan.
  */
 export const getUserProfileByUsername = async (
 	username: string,
 	currentUserId?: string,
 ) => {
-	const viewerKey = currentUserId;
-	const cacheKey = `profile:username:${username}:viewer:${viewerKey}`;
-	const cachedDurationSeconds = 3600;
+	const cacheKey = profileCacheKey(username);
 
-	const cachedProfile = await redis.get<UserProfilePayload>(cacheKey);
-	if (cachedProfile) return cachedProfile;
+	let profile = await redis.get<UserProfileCorePayload>(cacheKey);
 
-	const targetUser = await getTargetUser(username);
+	if (!profile) {
+		const targetUser = await getTargetUser(username);
+		const fetched = await userRepository.findProfileWithCounters(targetUser.id);
+		if (!fetched) {
+			throw new AppError("User profile data could not be retrieved", 404);
+		}
+
+		profile = fetched;
+		await redis.set(cacheKey, profile, 3600);
+	}
 
 	if (currentUserId) {
 		const isBlocked = await userRepository.checkBlockRelation(
 			currentUserId,
-			targetUser.id,
+			profile.id,
 		);
 		// Report a block as "not found" rather than 403: confirming the profile
 		// exists but is blocked would tell the blocked party they were blocked.
 		if (isBlocked) throw new AppError("Profile unavailable", 404);
 	}
 
-	const profile = await userRepository.findProfileWithCounters(targetUser.id);
-	if (!profile) {
-		throw new AppError("User profile data could not be retrieved", 404);
-	}
-
 	let isFollowing = false;
 	if (currentUserId) {
 		const followCheck = await userRepository.checkFollowRelation(
 			currentUserId,
-			targetUser.id,
+			profile.id,
 		);
 		isFollowing = !!followCheck;
 	}
 
 	const profilePayload: UserProfilePayload = { ...profile, isFollowing };
-
-	await redis.set(cacheKey, profilePayload, cachedDurationSeconds);
 	return profilePayload;
 };
 
 export const getUserPostsByUsername = async (username: string) => {
-	const cacheKey = `profile:username:${username}:posts`;
+	const cacheKey = profilePostsCacheKey(username);
 	const cachedDurationSeconds = 1800;
 
 	const cachedPosts = await redis.get<UserPostsPayload>(cacheKey);
@@ -85,7 +124,7 @@ export const getUserPostsByUsername = async (username: string) => {
 };
 
 export const getUserCommentsByUsername = async (username: string) => {
-	const cacheKey = `profile:username:${username}:comments`;
+	const cacheKey = profileCommentsCacheKey(username);
 	const cachedDurationSeconds = 1800;
 
 	const cachedComments = await redis.get<UserCommentsPayload>(cacheKey);
@@ -99,8 +138,10 @@ export const getUserCommentsByUsername = async (username: string) => {
 };
 
 /**
- * Follows a user. Both profiles are invalidated because each one's cached
- * follower/following counters and `isFollowing` flag have just changed.
+ * Follows a user and notifies them.
+ *
+ * Both profiles are invalidated because each one's cached follower/following
+ * counters and `isFollowing` flag have just changed.
  */
 export const followUserAction = async (
 	currentUserId: string,
@@ -111,11 +152,23 @@ export const followUserAction = async (
 		throw new AppError("You cannot follow yourself", 400);
 
 	await userRepository.createFollowRelation(currentUserId, targetUser.id);
-	const currentUser = await userRepository.findById(currentUserId);
-	if (currentUser) {
-		await redis.delPattern(`profile:username:${currentUser.username}:*`);
-	}
-	await redis.delPattern(`profile:username:${targetUsername}:*`);
+	await invalidateProfilePair(currentUserId, targetUsername);
+
+	const follower = await userRepository.findById(currentUserId);
+
+	// The NEW_FOLLOWER notification type existed in the schema, the queue payload
+	// union, and the repository union, but nothing ever produced one — following
+	// someone notified nobody. The stable relation key deduplicates a retried
+	// follow request while its completed BullMQ job is retained.
+	await sendInternalNotification({
+		recipientId: targetUser.id,
+		senderId: currentUserId,
+		type: "NEW_FOLLOWER",
+		dedupeKey: currentUserId,
+		title: "You have a new follower",
+		content: `@${follower?.username ?? "Someone"} started following you.`,
+		...(follower ? { link: `/users/${follower.username}` } : {}),
+	});
 };
 
 /**
@@ -128,11 +181,7 @@ export const unfollowUserAction = async (
 	const targetUser = await getTargetUser(targetUsername);
 	await userRepository.deleteFollowRelation(currentUserId, targetUser.id);
 
-	const currentUser = await userRepository.findById(currentUserId);
-	if (currentUser) {
-		await redis.delPattern(`profile:username:${currentUser.username}:*`);
-	}
-	await redis.delPattern(`profile:username:${targetUsername}:*`);
+	await invalidateProfilePair(currentUserId, targetUsername);
 };
 
 /**
@@ -150,11 +199,7 @@ export const blockUserAction = async (
 	await userRepository.deleteMutualFollows(currentUserId, targetUser.id);
 	await userRepository.createBlockRelation(currentUserId, targetUser.id);
 
-	const currentUser = await userRepository.findById(currentUserId);
-	if (currentUser) {
-		await redis.delPattern(`profile:username:${currentUser.username}:*`);
-	}
-	await redis.delPattern(`profile:username:${targetUsername}:*`);
+	await invalidateProfilePair(currentUserId, targetUsername);
 };
 
 /**
@@ -166,11 +211,8 @@ export const unblockUserAction = async (
 ) => {
 	const targetUser = await getTargetUser(targetUsername);
 	await userRepository.deleteBlockRelation(currentUserId, targetUser.id);
-	const currentUser = await userRepository.findById(currentUserId);
-	if (currentUser) {
-		await redis.delPattern(`profile:username:${currentUser.username}:*`);
-	}
-	await redis.delPattern(`profile:username:${targetUsername}:*`);
+
+	await invalidateProfilePair(currentUserId, targetUsername);
 };
 
 export const searchForUsers = async (data: UserSearchInput) => {
@@ -185,3 +227,13 @@ export const searchForUsers = async (data: UserSearchInput) => {
 
 	return users;
 };
+
+export const getSavedPosts = async (
+	userId: string,
+	query: SavedItemsQueryInput,
+) => userRepository.findSavedPosts(userId, query.limit, query.cursor);
+
+export const getSavedComments = async (
+	userId: string,
+	query: SavedItemsQueryInput,
+) => userRepository.findSavedComments(userId, query.limit, query.cursor);

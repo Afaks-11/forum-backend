@@ -62,6 +62,15 @@ export const userSearchSchema = z.object({
 		.pipe(z.number().int().min(1).max(50)),
 });
 
+export const savedItemsQuerySchema = z.object({
+	limit: z
+		.string()
+		.optional()
+		.transform((value) => (value ? Number.parseInt(value, 10) : 20))
+		.pipe(z.number().int().min(1).max(50)),
+	cursor: z.uuid().optional(),
+});
+
 export const userSearchResultItemSchema = z
 	.object({
 		id: z.uuid(),
@@ -80,3 +89,4 @@ export const compactUserSchema = z.object({
 });
 
 export type UserSearchInput = z.infer<typeof userSearchSchema>;
+export type SavedItemsQueryInput = z.infer<typeof savedItemsQuerySchema>;
