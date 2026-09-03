@@ -49,6 +49,9 @@ jobs:
       - name: Verify TypeScript Compilation Rules 
         run: npm run build 
 
+      - name: Verify Test TypeScript Compilation Rules
+        run: npm run typecheck:tests
+
       - name: Run Unit Tests with Coverage
         run: npm run test:coverage
 
@@ -163,4 +166,3 @@ jobs:
           echo "TypeScript build succeeded" >> $GITHUB_STEP_SUMMARY
           echo "Prisma client generated" >> $GITHUB_STEP_SUMMARY
           echo "Docker image built successfully" >> $GITHUB_STEP_SUMMARY
-
