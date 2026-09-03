@@ -26,4 +26,6 @@ REFACTOR-NOTES.md
 # Scratch typecheck config (tests/ is excluded from tsconfig.json)
 tsconfig.tests.tmp.json
 
-docs
+./docs
+
+text.md

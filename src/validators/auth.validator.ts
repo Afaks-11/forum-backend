@@ -82,6 +82,7 @@ export const userResponseSchema = z
 		}),
 		username: z.string().openapi({ example: "johndoe" }),
 		email: z.email().openapi({ example: "john@example.com" }),
+		role: z.string().openapi({ example: "USER" }),
 		isEmailVerified: z.boolean().openapi({ example: true }),
 		createdAt: z.date().openapi({ example: "2026-07-07T22:52:55Z" }),
 	})
@@ -99,16 +100,16 @@ export const profileResponseWrapper = z
 		success: z.boolean().openapi({ example: true }),
 		data: z.object({
 			userProfileDetails: userResponseSchema.optional(),
-			updatedUserProfileDetails: z
-				.object({
-					id: z.uuid(),
-					username: z.string(),
-					email: z.string(),
-				})
-				.optional(),
 		}),
 	})
 	.openapi("ProfileResponseWrapper");
+
+export const updatedProfileResponseWrapper = z.object({
+	success: z.boolean().openapi({ example: true }),
+	data: z.object({
+		updatedUserProfileDetails: userResponseSchema.optional(),
+	}),
+});
 
 export const resendTokenSchema = z
 	.object({

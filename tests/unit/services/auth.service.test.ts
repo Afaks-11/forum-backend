@@ -19,8 +19,7 @@ const mockUserRepository = {
 	findByResetToken: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	resetPasswordAndClearTokens:
 		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	findByVerifyToken: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	verifyEmailStatus: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	verifyEmailByToken: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateVerificationToken: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	incrementLoginAttemptsAtomic:
 		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -391,35 +390,34 @@ describe("Auth Service Unit Test Suite", () => {
 		});
 
 		it("verifyUserEmail: should safely process registration confirmation tokens", async () => {
-			const user = createFakeUser();
-			mockUserRepository.findByVerifyToken.mockResolvedValue(user);
-			mockUserRepository.verifyEmailStatus.mockResolvedValue({} as never);
+			mockUserRepository.verifyEmailByToken.mockResolvedValue(true);
 
 			await verifyUserEmail("token_val");
-			expect(mockUserRepository.verifyEmailStatus).toHaveBeenCalledWith(
-				user.id,
+			expect(mockUserRepository.verifyEmailByToken).toHaveBeenCalledWith(
+				"token_val",
 			);
 		});
 
 		it("verifyUserEmail: should reject a token whose expiry window has already elapsed", async () => {
-			const user = createFakeUser({
-				emailVerifyTokenExpires: new Date(Date.now() - 1000),
-			});
-			mockUserRepository.findByVerifyToken.mockResolvedValue(user);
+			mockUserRepository.verifyEmailByToken.mockResolvedValue(false);
 
 			await expect(verifyUserEmail("stale_token")).rejects.toThrow(
-				new AppError("Verification token has expired", 401),
+				new AppError("Invalid or expired verification token", 400),
 			);
-			expect(mockUserRepository.verifyEmailStatus).not.toHaveBeenCalled();
+			expect(mockUserRepository.verifyEmailByToken).toHaveBeenCalledWith(
+				"stale_token",
+			);
 		});
 
-		it("verifyUserEmail: should reject an unknown token without touching the database", async () => {
-			mockUserRepository.findByVerifyToken.mockResolvedValue(null);
+		it("verifyUserEmail: should reject an unknown token", async () => {
+			mockUserRepository.verifyEmailByToken.mockResolvedValue(false);
 
 			await expect(verifyUserEmail("nonexistent")).rejects.toThrow(
-				new AppError("Invalid or expired verification token", 401),
+				new AppError("Invalid or expired verification token", 400),
 			);
-			expect(mockUserRepository.verifyEmailStatus).not.toHaveBeenCalled();
+			expect(mockUserRepository.verifyEmailByToken).toHaveBeenCalledWith(
+				"nonexistent",
+			);
 		});
 	});
 });

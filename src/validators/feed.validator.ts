@@ -50,9 +50,6 @@ export const feedQuerySchema = z.object({
 		})
 		.transform((val) => (val ? parseInt(val, 10) : 10))
 		.pipe(z.number().int().min(1).max(50)),
-	// Validated rather than passed through: the ZSET path previously ran
-	// `parseInt` on a free-form string, so `?cursor=abc` produced NaN offsets that
-	// ZREVRANGE rejected as a 500, and negative offsets were accepted outright.
 	cursor: z
 		.string()
 		.optional()

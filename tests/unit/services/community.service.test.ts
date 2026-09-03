@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { AppError } from "../../../src/errors/AppError.js";
 import { MembershipRole } from "../../../src/generated/prisma/enums.js";
 
@@ -6,6 +6,8 @@ import { MembershipRole } from "../../../src/generated/prisma/enums.js";
 const mockCommunityRepository = {
 	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findByNameOrSlug: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findByNameOrSlugExcludingId:
+		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	createWithModerator: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findBySlug: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findAllCommunitiesWithMemberCount:
@@ -17,7 +19,7 @@ const mockCommunityRepository = {
 	findPostsByCommunityId: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	findMembershipsByCommunityId:
 		jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-	updateDescription: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	updateFields: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateRules: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	updateMediaAsset: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 	softDelete: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -30,8 +32,16 @@ const mockCommunityRepository = {
 	searchCommunities: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
+const mockCommunityInvitationRepository = {
+	findPending: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	accept: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	decline: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
+
 const mockUserRepository = {
 	findByUsername: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+	findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 };
 
 const mockRedis = {
@@ -45,6 +55,7 @@ const mockSendInternalNotification =
 
 await jest.unstable_mockModule("../../../src/repositories/index.js", () => ({
 	communityRepository: mockCommunityRepository,
+	communityInvitationRepository: mockCommunityInvitationRepository,
 	userRepository: mockUserRepository,
 }));
 await jest.unstable_mockModule("../../../src/utils/redis.js", () => ({
@@ -81,6 +92,10 @@ const { createFakeCommunity, createFakeMembership } = await import(
 );
 
 describe("Community Service Unit Test Suite", () => {
+	beforeEach(() => {
+		jest.resetAllMocks();
+	});
+
 	describe("createCommunity", () => {
 		it("Happy Path: should successfully create a new community and invalidate the global list cache", async () => {
 			const input = { name: "TypeScript", description: "JS with types" };
@@ -308,26 +323,56 @@ describe("Community Service Unit Test Suite", () => {
 	});
 
 	describe("updateCommunityFields", () => {
+		it("Happy Path: should allow a forum admin to update profile fields without membership", async () => {
+			const community = createFakeCommunity();
+			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "ADMIN" });
+			mockCommunityRepository.findByNameOrSlugExcludingId.mockResolvedValue(
+				null,
+			);
+
+			await updateCommunityFields("typescript", "usr_admin", {
+				name: "TypeScript Experts",
+				slug: "typescript-experts",
+				description: "A new description",
+			});
+
+			expect(
+				mockCommunityRepository.findByNameOrSlugExcludingId,
+			).toHaveBeenCalledWith(
+				"TypeScript Experts",
+				"typescript-experts",
+				community.id,
+			);
+			expect(mockCommunityRepository.updateFields).toHaveBeenCalledWith(
+				community.id,
+				{
+					name: "TypeScript Experts",
+					slug: "typescript-experts",
+					description: "A new description",
+				},
+			);
+		});
+
 		it("Happy Path: should update description when authorized by an active moderator", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 			mockCommunityRepository.findMembership.mockResolvedValue(
 				createFakeMembership({ role: MembershipRole.MODERATOR }),
 			);
-			mockCommunityRepository.updateDescription.mockResolvedValue({
+			mockCommunityRepository.updateFields.mockResolvedValue({
 				...community,
 				description: "New",
 			});
 
-			const result = await updateCommunityFields(
-				"typescript",
-				"usr_mod",
-				"New Description",
-			);
+			const result = await updateCommunityFields("typescript", "usr_mod", {
+				description: "New Description",
+			});
 
-			expect(mockCommunityRepository.updateDescription).toHaveBeenCalledWith(
+			expect(mockCommunityRepository.updateFields).toHaveBeenCalledWith(
 				community.id,
-				"New Description",
+				{ description: "New Description" },
 			);
 			expect(mockRedis.del).toHaveBeenCalledWith("community:slug:typescript");
 			expect(result.description).toBe("New");
@@ -336,12 +381,15 @@ describe("Community Service Unit Test Suite", () => {
 		it("Business Rule: should reject update with 403 AppError if executor lacks moderator privileges", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 			mockCommunityRepository.findMembership.mockResolvedValue(
 				createFakeMembership({ role: MembershipRole.MEMBER }),
 			);
 
 			await expect(
-				updateCommunityFields("typescript", "usr_member", "New"),
+				updateCommunityFields("typescript", "usr_member", {
+					description: "New",
+				}),
 			).rejects.toThrow(
 				new AppError("Forbidden: Moderator privileges required", 403),
 			);
@@ -352,6 +400,7 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path: should successfully modify community rules under proper authentication", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 			mockCommunityRepository.findMembership.mockResolvedValue(
 				createFakeMembership({ role: MembershipRole.MODERATOR }),
 			);
@@ -370,6 +419,7 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path: should update avatarUrl when targetType equals avatar", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 			mockCommunityRepository.findMembership.mockResolvedValue(
 				createFakeMembership({ role: MembershipRole.MODERATOR }),
 			);
@@ -392,6 +442,7 @@ describe("Community Service Unit Test Suite", () => {
 		it("Happy Path: should update bannerUrl when targetType equals banner", async () => {
 			const community = createFakeCommunity();
 			mockRedis.get.mockResolvedValue(community);
+			mockUserRepository.findById.mockResolvedValue({ role: "USER" });
 			mockCommunityRepository.findMembership.mockResolvedValue(
 				createFakeMembership({ role: MembershipRole.MODERATOR }),
 			);
@@ -450,10 +501,16 @@ describe("Community Service Unit Test Suite", () => {
 				name: "TypeScript",
 				slug: "typescript",
 			});
-			mockCommunityRepository.findMembership.mockResolvedValue({
-				role: "MEMBER",
-			});
+			mockCommunityRepository.findMembership
+				.mockResolvedValueOnce({
+					role: "MEMBER",
+				})
+				.mockResolvedValueOnce(null);
 			mockUserRepository.findByUsername.mockResolvedValue({ id: "usr_target" });
+			mockCommunityInvitationRepository.findPending.mockResolvedValue(null);
+			mockCommunityInvitationRepository.create.mockResolvedValue({
+				id: "invitation_1",
+			});
 			mockSendInternalNotification.mockResolvedValue({ id: "job_1" });
 
 			const result = await inviteUserToCommunitySpace(
@@ -472,10 +529,11 @@ describe("Community Service Unit Test Suite", () => {
 				recipientId: "usr_target",
 				senderId: "usr_sender",
 				type: "COMMUNITY_INVITE",
-				dedupeKey: "community_1:usr_sender",
-				title: "Invitation to join r/TypeScript",
-				content: expect.any(String),
-				link: "/communities/typescript",
+				dedupeKey: "community_1:usr_sender:usr_target",
+				title: "Invitation to join TypeScript",
+				content:
+					"You have been explicitly invited to join and participate inside the TypeScript group network!",
+				link: "/community-invitations/invitation_1",
 			});
 			expect(result).toEqual({ id: "job_1" });
 		});

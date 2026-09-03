@@ -1,7 +1,12 @@
 import { AppError } from "../errors/AppError.js";
 import { MembershipRole } from "../generated/prisma/enums.js";
-import { communityRepository, userRepository } from "../repositories/index.js";
+import {
+	communityInvitationRepository,
+	communityRepository,
+	userRepository,
+} from "../repositories/index.js";
 import { redis } from "../utils/redis.js";
+import { isAdmin } from "../utils/roles.js";
 import type {
 	CommunitySearchInput,
 	CreateCommunityInput,
@@ -46,6 +51,9 @@ const getCommunityBySlug = async (slug: string) => {
 };
 
 const checkModPermission = async (communityId: string, userId: string) => {
+	const user = await userRepository.findById(userId);
+	if (isAdmin(user?.role)) return;
+
 	const membership = await communityRepository.findMembership(
 		userId,
 		communityId,
@@ -68,6 +76,7 @@ export const createCommunity = async (
 	if (slug.length < 2) {
 		throw new AppError("Community name cannot produce a valid slug", 400);
 	}
+
 	const existing = await communityRepository.findByNameOrSlug(data.name, slug);
 	if (existing) {
 		throw new AppError("A community with this name already exists", 409);
@@ -205,17 +214,42 @@ export const getGroupRoster = async (
 export const updateCommunityFields = async (
 	slug: string,
 	userId: string,
-	description?: string,
+	data: {
+		name?: string | undefined;
+		slug?: string | undefined;
+		description?: string | undefined;
+	},
 ) => {
 	const group = await getCommunityBySlug(slug);
 	await checkModPermission(group.id, userId);
 
-	const result = await communityRepository.updateDescription(
-		group.id,
-		description ?? null,
-	);
+	const normalizedSlug = data.slug
+		? createCommunitySlug(data.slug)
+		: group.slug;
+
+	const updateData = {
+		...data,
+		...(data.slug ? { slug: normalizedSlug } : {}),
+	};
+	if (data.name || data.slug) {
+		const conflict = await communityRepository.findByNameOrSlugExcludingId(
+			data.name ?? group.name,
+			normalizedSlug ?? group.slug,
+			group.id,
+		);
+		if (conflict)
+			throw new AppError(
+				"A community with this name or slug already exists",
+				409,
+			);
+	}
+
+	const result = await communityRepository.updateFields(group.id, updateData);
 
 	await redis.del(`community:slug:${slug}`);
+	if (data.slug && data.slug !== slug)
+		await redis.del(`community:slug:${data.slug}`);
+	await redis.del("communities:list");
 	return result;
 };
 
@@ -314,18 +348,78 @@ export const inviteUserToCommunitySpace = async (
 	}
 
 	const targetUser = await userRepository.findByUsername(targetUsername);
-	if (!targetUser)
+	if (!targetUser) {
 		throw new AppError(`User account '@${targetUsername}' does not exist`, 404);
+	}
+	if (targetUser.id === senderId) {
+		throw new AppError("You cannot invite to a community space", 400);
+	}
+
+	const targetMembership = await communityRepository.findMembership(
+		targetUser.id,
+		community.id,
+	);
+	if (targetMembership) {
+		throw new AppError("This user is already a member of this community", 400);
+	}
+	const existingInvitation = await communityInvitationRepository.findPending(
+		community.id,
+		targetUser.id,
+	);
+	if (existingInvitation) {
+		throw new AppError("This user already has a pending invitation", 409);
+	}
+	const invitation = await communityInvitationRepository.create({
+		communityId: community.id,
+		inviteeId: targetUser.id,
+		inviterId: senderId,
+		expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+	});
 
 	return await sendInternalNotification({
 		recipientId: targetUser.id,
 		senderId,
 		type: "COMMUNITY_INVITE",
-		dedupeKey: `${community.id}:${senderId}`,
-		title: `Invitation to join r/${community.name}`,
+		dedupeKey: `${community.id}:${senderId}:${targetUser.id}`,
+		title: `Invitation to join ${community.name}`,
 		content: `You have been explicitly invited to join and participate inside the ${community.name} group network!`,
-		link: `/communities/${community.slug}`,
+		link: `/community-invitations/${invitation.id}`,
 	});
+};
+
+export const acceptCommunityInvitation = async (
+	invitationId: string,
+	userId: string,
+) => {
+	const invitation = await communityInvitationRepository.accept(
+		invitationId,
+		userId,
+	);
+	if (!invitation)
+		throw new AppError(
+			"Invitation is invalid, expired, or not addressed to you",
+			404,
+		);
+	const community = await communityRepository.findById(invitation.communityId);
+	if (community) await redis.del(`community:slug:${community.slug}`);
+	await redis.del("communities:list");
+	return invitation;
+};
+
+export const declineCommunityInvitation = async (
+	invitationId: string,
+	userId: string,
+) => {
+	const result = await communityInvitationRepository.decline(
+		invitationId,
+		userId,
+	);
+	if (result.count === 0)
+		throw new AppError(
+			"Invitation is invalid, expired, or not addressed to you",
+			404,
+		);
+	return { message: "Community invitation declined." };
 };
 
 /**
@@ -393,8 +487,6 @@ export async function revokeModeratorRole(
 		);
 	}
 
-	// Refuse to demote the last moderator: the community would be left with no
-	// one able to moderate it or appoint a replacement.
 	const updated = await communityRepository.demoteModeratorIfAnotherExists(
 		communityId,
 		targetUserId,

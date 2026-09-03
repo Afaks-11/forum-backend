@@ -28,6 +28,14 @@ enum MembershipRole {
   MODERATOR
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REVOKED
+}
+
 enum VoteType {
   UPVOTE
   DOWNVOTE
@@ -77,6 +85,8 @@ model User {
   posts             Post[]
   lockedPosts Post[] @relation("PostLocks")
   ownedCommunities  Community[]     @relation("CommunityOwner")
+  sentCommunityInvitations CommunityInvitation[] @relation("CommunityInvitationSender")
+  receivedCommunityInvitations CommunityInvitation[] @relation("CommunityInvitationInvitee")
   memberships       Membership[]
   comments          Comment[]
   votes             Vote[]
@@ -115,6 +125,7 @@ model Community {
 
   posts   Post[]
   members Membership[]
+  invitations CommunityInvitation[]
 
   @@index([creatorId])
   @@index([deletedAt])
@@ -379,4 +390,25 @@ model Notification {
 
   @@index([recipientId, isRead, createdAt(sort: Desc)])
   @@map("notifications")
+}
+
+model CommunityInvitation {
+  id          String @id @default(uuid())
+  communityId String @map("community_id")
+  inviteeId   String @map("invitee_id")
+  inviterId   String @map("inviter_id")
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime @map("expires_at")
+  respondedAt DateTime? @map("responded_at")
+  notificationId String? @unique @map("notification_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  invitee User @relation("CommunityInvitationInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+  inviter User @relation("CommunityInvitationSender", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([inviteeId, status])
+  @@index([communityId, inviteeId, status])
+  @@map("community_invitations")
 }

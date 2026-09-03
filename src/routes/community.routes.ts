@@ -1,8 +1,10 @@
 import express from "express";
 import {
+	acceptInvitation,
 	addCommunityModerator,
 	browseCommunities,
 	community,
+	declineInvitation,
 	deleteCommunity,
 	getCommunity,
 	getCommunityMembers,
@@ -34,6 +36,8 @@ router.get("/:slug/moderators", getCommunityModerators);
 router.post("/", requireAuth, community);
 router.post("/:slug/join", requireAuth, joinCommunity);
 router.post("/:slug/invite", requireAuth, inviteToCommunity);
+router.post("/invitations/:id/accept", requireAuth, acceptInvitation);
+router.post("/invitations/:id/decline", requireAuth, declineInvitation);
 router.post("/:id/moderators", requireAuth, addCommunityModerator);
 
 router.patch("/:slug", requireAuth, patchCommunity);

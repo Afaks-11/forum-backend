@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../middlewares/asyncHandler.js";
 import {
+	acceptCommunityInvitation,
 	assignModeratorRole,
 	createCommunity,
+	declineCommunityInvitation,
 	deleteCommunityAction,
 	getAllCommunitiesList,
 	getCommunityDetails,
@@ -20,6 +22,7 @@ import {
 import {
 	addModeratorSchema,
 	communityIdParamSchema,
+	communityInvitationIdParamSchema,
 	communitySearchSchema,
 	createCommunitySchema,
 	inviteToCommunitySchema,
@@ -86,11 +89,11 @@ export const getCommunityModerators = asyncHandler(async (req, res) => {
 
 export const patchCommunity = asyncHandler(async (req, res) => {
 	const { slug } = slugParamSchema.parse(req.params);
-	const { description } = updateCommunitySchema.parse(req.body);
+	const fields = updateCommunitySchema.parse(req.body);
 	const data = await updateCommunityFields(
 		slug,
 		res.locals.user.userId,
-		description,
+		fields,
 	);
 	res.status(200).json({ success: true, data });
 });
@@ -150,6 +153,20 @@ export const inviteToCommunity = asyncHandler(
 		});
 	},
 );
+
+export const acceptInvitation = asyncHandler(async (req, res) => {
+	const { id } = communityInvitationIdParamSchema.parse(req.params);
+	const data = await acceptCommunityInvitation(id, res.locals.user.userId);
+	res.status(200).json({ success: true, data });
+});
+
+export const declineInvitation = asyncHandler(async (req, res) => {
+	const { id } = communityInvitationIdParamSchema.parse(req.params);
+	await declineCommunityInvitation(id, res.locals.user.userId);
+	res
+		.status(200)
+		.json({ success: true, message: "Community invitation declined." });
+});
 
 export const addCommunityModerator = asyncHandler(async (req, res) => {
 	const { id } = communityIdParamSchema.parse(req.params);

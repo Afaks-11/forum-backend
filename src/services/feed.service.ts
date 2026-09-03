@@ -44,16 +44,6 @@ const attachViewerVotes = async <T extends { id: string }>(
 
 /**
  * The single feed implementation, serving both `GET /feed` and `GET /posts`.
- *
- * There used to be two functions of this name — one here with the Redis fast
- * path, one in `post.service` with viewer-vote folding — writing to the same
- * `feed:advanced:` cache namespace with different clamping and envelopes. This
- * is the merge of both.
- *
- * Unfiltered `hot`/`controversial` requests read the sorted sets the ranking
- * worker maintains, which is why their cursor is a rank offset rather than a
- * keyset UUID: Redis addresses ZSET members by rank. Every other path caches the
- * repository's keyset page.
  */
 export const getAdvancedPostsFeed = async (
 	filters: AdvancedFeedFilters,
@@ -111,8 +101,7 @@ export const getAdvancedPostsFeed = async (
 	}
 
 	// Standard keyset paths (new / top / any contextual filter).
-	// Rebuilt key by key instead of spread: the incoming type permits explicit
-	// `undefined`, which `exactOptionalPropertyTypes` will not accept downstream.
+	// Rebuilt key by key instead of spread
 	const repoFilters: {
 		sort?: "new" | "top" | "hot" | "controversial";
 		community?: string;

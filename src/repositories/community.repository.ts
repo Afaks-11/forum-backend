@@ -24,6 +24,20 @@ export class CommunityRepository {
 		});
 	}
 
+	async findByNameOrSlugExcludingId(
+		name: string,
+		slug: string,
+		communityId: string,
+	) {
+		return await this.prisma.community.findFirst({
+			where: {
+				deletedAt: null,
+				id: { not: communityId },
+				OR: [{ name }, { slug }],
+			},
+		});
+	}
+
 	/**
 	 * Creates a community and its creator's MODERATOR membership in one
 	 * transaction, so a failure cannot leave a community with no moderator and
@@ -155,10 +169,23 @@ export class CommunityRepository {
 	/**
 	 * Update community generic fields
 	 */
-	async updateDescription(communityId: string, description: string | null) {
+	async updateFields(
+		communityId: string,
+		data: {
+			name?: string | undefined;
+			slug?: string | undefined;
+			description?: string | undefined;
+		},
+	) {
+		const updateData = {
+			...(data.name !== undefined && { name: data.name }),
+			...(data.slug !== undefined && { slug: data.slug }),
+			...(data.description !== undefined && { description: data.description }),
+		};
+
 		return await this.prisma.community.update({
 			where: { id: communityId },
-			data: { description },
+			data: updateData,
 		});
 	}
 

@@ -73,11 +73,10 @@ export const registerUser = async (data: RegisterInput) => {
  * Applies the failed-attempt lockout and rejects unverified or deleted accounts.
  */
 export const loginUser = async (data: LoginInput) => {
-	let user = await userRepository.findByEmail(data.email);
+	const user = await userRepository.findByEmail(data.email);
 
 	// The lock is evaluated before the hash comparison so a locked account costs
-	// one indexed read instead of ~70ms of bcrypt per attempt; otherwise the
-	// lockout is useless as a CPU-exhaustion defence.
+	// one indexed read instead of ~70ms of bcrypt per attempt
 	if (user?.lockUntil) {
 		if (user.lockUntil > new Date()) {
 			throw new AppError(
@@ -86,49 +85,42 @@ export const loginUser = async (data: LoginInput) => {
 			);
 		}
 
-		// An elapsed window is a reset point, not a starting score. Leaving the
-		// counter at 5 let one further wrong password re-arm the lock forever, so
-		// an attacker who only knew an email address could keep any account locked
-		// indefinitely at one request per window.
-		user = await userRepository.updateLoginLockState(user.id, {
+		// An expired lock starts a fresh failed-attempt window.
+		await userRepository.updateLoginLockState(user.id, {
 			loginAttempts: 0,
 			lockUntil: null,
 		});
 	}
 
 	// Always run a bcrypt comparison, even for unknown emails. Skipping it would
-	// let an attacker distinguish registered from unregistered addresses by
-	// response latency alone.
+	// let an attacker distinguish registered from unregistered addresses by response latency alone.
 	const DUMMY_HASH =
 		"$2b$10$abcdefghijklmnopqrstuvwxyzA1234567890FakeHashForTimingDef";
 	const hashToValidate = user ? user.password : DUMMY_HASH;
 	const isPasswordValid = await bcrypt.compare(data.password, hashToValidate);
 
-	if (!user || !isPasswordValid) {
-		if (user) {
+	const MAX_LOGIN_ATTEMPTS = 5;
+
+	if (!user || user.deletedAt || !isPasswordValid) {
+		if (user && !user.deletedAt) {
 			const updatedUser = await userRepository.incrementLoginAttemptsAtomic(
 				user.id,
 			);
 
-			if (updatedUser.loginAttempts === 5) {
+			if (updatedUser.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
 				await enqueueSystemEmail(`login-attempt-failed:${user.id}`, {
 					to: user.email,
 					subject: "Security Alert: Too many failed login attempts",
-					htmlContent: `<p>Your account has been locked for 15 minutes due to 5 consecutive failed login attempts.</p>`,
+					htmlContent: `<p>Hello ${user.username},</p> <p> Your account has been temporarily locked after multiple failed login attempts. </p> <p> If this wasn't you, we recommend changing your password after you regain access. </p>`,
 				});
-			}
 
-			if (updatedUser.loginAttempts >= 5) {
 				throw new AppError(
 					"Account locked due to multiple login failures.",
 					423,
 				);
 			}
 		}
-		throw new AppError("Invalid email or password credentials", 400);
-	}
 
-	if (user.deletedAt) {
 		throw new AppError("Invalid email or password credentials", 400);
 	}
 
@@ -162,7 +154,7 @@ export const loginUser = async (data: LoginInput) => {
 	await enqueueSystemEmail(`login-user:${user.id}`, {
 		to: user.email,
 		subject: "New Login Detected",
-		htmlContent: `<p>Hello ${user.username}, a new login was recorded at ${new Date().toISOString()}.</p>`,
+		htmlContent: `<p>Hello ${user.username},</p> <p> A new login was recorded at ${new Date().toISOString()}. </p> <p> If this wasn't you, please secure your account immediately. </p>`,
 	});
 
 	return {
@@ -322,8 +314,6 @@ export const processForgotPassword = async (email: string) => {
 export const resendVerificationToken = async (email: string) => {
 	const user = await userRepository.findByEmail(email);
 
-	// Do not reveal whether an account exists or is already verified: return
-	// silently so the generic controller response can't be used for enumeration.
 	if (!user || user.deletedAt || user.isEmailVerified) return;
 
 	const newVerificationToken = crypto.randomBytes(32).toString("hex");
@@ -364,13 +354,9 @@ export const processResetPassword = async (data: ResetPasswordInput) => {
  * Redeems an email verification token, rejecting unknown or expired ones.
  */
 export const verifyUserEmail = async (token: string) => {
-	const user = await userRepository.findByVerifyToken(token);
-	if (!user) throw new AppError("Invalid or expired verification token", 401);
-	if (
-		!user.emailVerifyTokenExpires ||
-		user.emailVerifyTokenExpires < new Date()
-	) {
-		throw new AppError("Verification token has expired", 401);
+	const isVerified = await userRepository.verifyEmailByToken(token);
+
+	if (!isVerified) {
+		throw new AppError("Invalid or expired verification token", 400);
 	}
-	await userRepository.verifyEmailStatus(user.id);
 };
